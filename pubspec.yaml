@@ -34,6 +34,16 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  google_mobile_ads: ^8.0.0
+  gma_mediation_unity: ^1.8.0
+  gma_mediation_meta: ^1.5.2
+  gma_mediation_applovin: ^2.6.1
+  gma_mediation_mintegral: ^2.1.0
+  gma_mediation_pangle: ^3.6.0
+  gma_mediation_ironsource: ^2.4.2
+  gma_mediation_liftoffmonetize: ^1.5.0
+  gma_mediation_inmobi: ^2.2.0
+  gma_mediation_dtexchange: ^1.3.4
 
 dev_dependencies:
   flutter_test:
