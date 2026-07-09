@@ -1,8 +1,24 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="admob_mediation_flutter"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- AdMob App ID. This is Google's TEST app id.
+             TODO: Replace with your real app id from the AdMob dashboard
+             (Apps -> App settings -> App ID) before release. Using a wrong
+             or missing id crashes the app on startup. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
+        <!-- Load the Mobile Ads SDK on a background thread and optimize ad
+             loading (reduces jank on the main thread). -->
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
+            android:value="true"/>
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
+            android:value="true"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"
