@@ -52,7 +52,8 @@ class _NativeAdCardState extends State<NativeAdCard> {
 
   void _maybeLoad() {
     if (!mounted || !AdsService.instance.isReady || _nativeAd != null) return;
-    final adUnitId = widget.adUnitId ??
+    final adUnitId =
+        widget.adUnitId ??
         AdsService.instance.config.adUnitIdFor(AdFormat.native);
     if (adUnitId == null) return;
 
@@ -93,8 +94,10 @@ class _NativeAdCardState extends State<NativeAdCard> {
       ),
       listener: NativeAdListener(
         onAdLoaded: (ad) {
-          _emit(AdEventType.loaded,
-              adapter: ad.responseInfo?.mediationAdapterClassName);
+          _emit(
+            AdEventType.loaded,
+            adapter: ad.responseInfo?.mediationAdapterClassName,
+          );
           if (!mounted) {
             ad.dispose();
             return;
@@ -114,8 +117,18 @@ class _NativeAdCardState extends State<NativeAdCard> {
         },
         onAdImpression: (ad) => _emit(AdEventType.impression),
         onAdClicked: (ad) => _emit(AdEventType.clicked),
+        onPaidEvent: (ad, valueMicros, precision, currencyCode) => _emit(
+          AdEventType.paid,
+          adapter: ad.responseInfo?.mediationAdapterClassName,
+          revenue: AdRevenue(
+            valueMicros: valueMicros,
+            currencyCode: currencyCode,
+            precision: precision,
+          ),
+        ),
       ),
-    )..load();
+    );
+    _nativeAd!.load();
   }
 
   @override
@@ -125,13 +138,21 @@ class _NativeAdCardState extends State<NativeAdCard> {
     super.dispose();
   }
 
-  void _emit(AdEventType type, {Object? error, String? adapter}) {
-    AdEventBus.instance.emit(AdEvent(
-      format: AdFormat.native,
-      type: type,
-      error: error,
-      mediationAdapter: adapter,
-    ));
+  void _emit(
+    AdEventType type, {
+    Object? error,
+    String? adapter,
+    AdRevenue? revenue,
+  }) {
+    AdEventBus.instance.emit(
+      AdEvent(
+        format: AdFormat.native,
+        type: type,
+        error: error,
+        mediationAdapter: adapter,
+        revenue: revenue,
+      ),
+    );
   }
 
   @override

@@ -14,11 +14,11 @@ import '../core/full_screen_ad_service.dart';
 /// users aren't greeted with an ad when they come back.
 class AppOpenAdService extends FullScreenAdService<AppOpenAd> {
   AppOpenAdService._()
-      : super(
-          format: AdFormat.appOpen,
-          // Per AdMob docs app open ads expire after 4 hours.
-          ttl: const Duration(hours: 4),
-        );
+    : super(
+        format: AdFormat.appOpen,
+        // Per AdMob docs app open ads expire after 4 hours.
+        ttl: const Duration(hours: 4),
+      );
 
   static final AppOpenAdService instance = AppOpenAdService._();
 
@@ -42,8 +42,9 @@ class AppOpenAdService extends FullScreenAdService<AppOpenAd> {
   void listenToAppForeground() {
     if (_appStateSubscription != null) return;
     AppStateEventNotifier.startListening();
-    _appStateSubscription =
-        AppStateEventNotifier.appStateStream.listen((AppState state) {
+    _appStateSubscription = AppStateEventNotifier.appStateStream.listen((
+      AppState state,
+    ) {
       if (state == AppState.foreground) _onForeground();
     });
   }

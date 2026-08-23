@@ -75,7 +75,8 @@ abstract final class AdMobMediation {
       InterstitialAdService.instance.show(onDismissed: onDismissed);
 
   /// Explicit pre-load; normally unnecessary (the service self-loads).
-  static Future<void> loadInterstitial() => InterstitialAdService.instance.load();
+  static Future<void> loadInterstitial() =>
+      InterstitialAdService.instance.load();
 
   static ValueListenable<bool> get isInterstitialReady =>
       InterstitialAdService.instance.isAdReady;
@@ -89,11 +90,10 @@ abstract final class AdMobMediation {
   static Future<bool> showRewarded({
     required void Function(RewardItem reward) onReward,
     VoidCallback? onDismissed,
-  }) =>
-      RewardedAdService.instance.showWithReward(
-        onReward: (_, reward) => onReward(reward),
-        onDismissed: onDismissed,
-      );
+  }) => RewardedAdService.instance.showWithReward(
+    onReward: (_, reward) => onReward(reward),
+    onDismissed: onDismissed,
+  );
 
   static Future<void> loadRewarded() => RewardedAdService.instance.load();
 
@@ -107,11 +107,10 @@ abstract final class AdMobMediation {
   static Future<bool> showRewardedInterstitial({
     required void Function(RewardItem reward) onReward,
     VoidCallback? onDismissed,
-  }) =>
-      RewardedInterstitialAdService.instance.showWithReward(
-        onReward: (_, reward) => onReward(reward),
-        onDismissed: onDismissed,
-      );
+  }) => RewardedInterstitialAdService.instance.showWithReward(
+    onReward: (_, reward) => onReward(reward),
+    onDismissed: onDismissed,
+  );
 
   static Future<void> loadRewardedInterstitial() =>
       RewardedInterstitialAdService.instance.load();

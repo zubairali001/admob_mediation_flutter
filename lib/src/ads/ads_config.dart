@@ -50,8 +50,9 @@ class AdsConfig {
     this.rewardedInterstitialMinInterval = const Duration(seconds: 60),
     this.autoShowAppOpenOnResume = true,
     this.debugGeography,
-  }) : useTestAds = useTestAds ??
-            (kDebugMode || const bool.fromEnvironment('FORCE_TEST_ADS'));
+  }) : useTestAds =
+           useTestAds ??
+           (kDebugMode || const bool.fromEnvironment('FORCE_TEST_ADS'));
 
   /// Ad unit ids per format. Any format you don't configure simply won't
   /// serve (its service stays idle after the first failed lookup).
@@ -99,8 +100,7 @@ class AdsConfig {
       AdFormat.rewarded => rewarded,
       AdFormat.rewardedInterstitial => rewardedInterstitial,
       AdFormat.native => native,
-    }
-        .resolve();
+    }.resolve();
     assert(
       id != null,
       'No ${format.name} ad unit id configured for this platform. '
@@ -112,24 +112,30 @@ class AdsConfig {
   static String _googleTestId(AdFormat format) {
     final android = Platform.isAndroid;
     return switch (format) {
-      AdFormat.appOpen => android
-          ? 'ca-app-pub-3940256099942544/9257395921'
-          : 'ca-app-pub-3940256099942544/5575463023',
-      AdFormat.banner => android
-          ? 'ca-app-pub-3940256099942544/9214589741'
-          : 'ca-app-pub-3940256099942544/2435281174',
-      AdFormat.interstitial => android
-          ? 'ca-app-pub-3940256099942544/1033173712'
-          : 'ca-app-pub-3940256099942544/4411468910',
-      AdFormat.rewarded => android
-          ? 'ca-app-pub-3940256099942544/5224354917'
-          : 'ca-app-pub-3940256099942544/1712485313',
-      AdFormat.rewardedInterstitial => android
-          ? 'ca-app-pub-3940256099942544/5354046379'
-          : 'ca-app-pub-3940256099942544/6978759866',
-      AdFormat.native => android
-          ? 'ca-app-pub-3940256099942544/2247696110'
-          : 'ca-app-pub-3940256099942544/3986624511',
+      AdFormat.appOpen =>
+        android
+            ? 'ca-app-pub-3940256099942544/9257395921'
+            : 'ca-app-pub-3940256099942544/5575463023',
+      AdFormat.banner =>
+        android
+            ? 'ca-app-pub-3940256099942544/9214589741'
+            : 'ca-app-pub-3940256099942544/2435281174',
+      AdFormat.interstitial =>
+        android
+            ? 'ca-app-pub-3940256099942544/1033173712'
+            : 'ca-app-pub-3940256099942544/4411468910',
+      AdFormat.rewarded =>
+        android
+            ? 'ca-app-pub-3940256099942544/5224354917'
+            : 'ca-app-pub-3940256099942544/1712485313',
+      AdFormat.rewardedInterstitial =>
+        android
+            ? 'ca-app-pub-3940256099942544/5354046379'
+            : 'ca-app-pub-3940256099942544/6978759866',
+      AdFormat.native =>
+        android
+            ? 'ca-app-pub-3940256099942544/2247696110'
+            : 'ca-app-pub-3940256099942544/3986624511',
     };
   }
 }

@@ -57,7 +57,8 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     if (!mounted || !AdsService.instance.isReady) return;
     if (_bannerAd != null) return;
 
-    final adUnitId = widget.adUnitId ??
+    final adUnitId =
+        widget.adUnitId ??
         AdsService.instance.config.adUnitIdFor(AdFormat.banner);
     if (adUnitId == null) return;
 
@@ -74,8 +75,10 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
           : const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
-          _emit(AdEventType.loaded,
-              adapter: ad.responseInfo?.mediationAdapterClassName);
+          _emit(
+            AdEventType.loaded,
+            adapter: ad.responseInfo?.mediationAdapterClassName,
+          );
           if (!mounted) {
             ad.dispose();
             return;
@@ -98,6 +101,15 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
         },
         onAdImpression: (ad) => _emit(AdEventType.impression),
         onAdClicked: (ad) => _emit(AdEventType.clicked),
+        onPaidEvent: (ad, valueMicros, precision, currencyCode) => _emit(
+          AdEventType.paid,
+          adapter: ad.responseInfo?.mediationAdapterClassName,
+          revenue: AdRevenue(
+            valueMicros: valueMicros,
+            currencyCode: currencyCode,
+            precision: precision,
+          ),
+        ),
       ),
     );
 
@@ -121,15 +133,21 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     super.dispose();
   }
 
-  void _emit(AdEventType type,
-      {Object? error, AdRevenue? revenue, String? adapter}) {
-    AdEventBus.instance.emit(AdEvent(
-      format: AdFormat.banner,
-      type: type,
-      error: error,
-      revenue: revenue,
-      mediationAdapter: adapter,
-    ));
+  void _emit(
+    AdEventType type, {
+    Object? error,
+    AdRevenue? revenue,
+    String? adapter,
+  }) {
+    AdEventBus.instance.emit(
+      AdEvent(
+        format: AdFormat.banner,
+        type: type,
+        error: error,
+        revenue: revenue,
+        mediationAdapter: adapter,
+      ),
+    );
   }
 
   @override

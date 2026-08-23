@@ -14,7 +14,7 @@ import '../core/full_screen_ad_service.dart';
 class RewardedInterstitialAdService
     extends FullScreenAdService<RewardedInterstitialAd> {
   RewardedInterstitialAdService._()
-      : super(format: AdFormat.rewardedInterstitial);
+    : super(format: AdFormat.rewardedInterstitial);
 
   static final RewardedInterstitialAdService instance =
       RewardedInterstitialAdService._();
@@ -28,9 +28,13 @@ class RewardedInterstitialAdService
   Future<bool> showWithReward({
     required OnUserEarnedRewardCallback onReward,
     VoidCallback? onDismissed,
-  }) {
+  }) async {
     _pendingOnReward = onReward;
-    return show(onDismissed: onDismissed);
+    final shown = await show(onDismissed: onDismissed);
+    if (!shown) {
+      _pendingOnReward = null;
+    }
+    return shown;
   }
 
   @override
@@ -46,10 +50,10 @@ class RewardedInterstitialAdService
   }
 
   @override
-  Future<void> showPlatformAd(RewardedInterstitialAd ad) {
+  Future<void> showPlatformAd(RewardedInterstitialAd ad) async {
     ad.fullScreenContentCallback =
         buildFullScreenCallback<RewardedInterstitialAd>();
-    return ad.show(
+    await ad.show(
       onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
         emitReward(reward);
         _pendingOnReward?.call(ad, reward);
