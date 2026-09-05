@@ -57,14 +57,14 @@ class AppOpenAdService extends FullScreenAdService<AppOpenAd> {
     }
     // If another full-screen ad triggered the background/foreground cycle
     // (its own overlay), the global flag in the base class blocks stacking.
-    show();
+    unawaited(show());
   }
 
   @override
   Future<void> loadPlatformAd() {
     return AppOpenAd.load(
       adUnitId: adUnitId!,
-      request: const AdRequest(),
+      request: AdsService.instance.config.requestFor(format),
       adLoadCallback: AppOpenAdLoadCallback(
         onAdLoaded: onAdLoaded,
         onAdFailedToLoad: onAdFailedToLoad,

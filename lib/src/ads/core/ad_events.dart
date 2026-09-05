@@ -4,7 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 /// Every ad format the app serves.
-enum AdFormat { appOpen, banner, interstitial, rewarded, rewardedInterstitial, native }
+enum AdFormat {
+  appOpen,
+  banner,
+  interstitial,
+  rewarded,
+  rewardedInterstitial,
+  native,
+}
 
 /// Lifecycle events emitted by the ad services.
 enum AdEventType {
@@ -85,7 +92,8 @@ class AdEventBus {
 
   static final AdEventBus instance = AdEventBus._();
 
-  final StreamController<AdEvent> _controller = StreamController<AdEvent>.broadcast();
+  final StreamController<AdEvent> _controller =
+      StreamController<AdEvent>.broadcast();
 
   Stream<AdEvent> get stream => _controller.stream;
 

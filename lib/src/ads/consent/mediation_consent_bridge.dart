@@ -1,23 +1,40 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+/// Privacy choices supplied by the app's consent management flow.
+@immutable
+final class MediationConsent {
+  const MediationConsent({
+    required this.hasGdprConsent,
+    required this.ccpaOptedOut,
+  });
+
+  /// Whether GDPR consent required by an explicit partner API was granted.
+  final bool hasGdprConsent;
+
+  /// Whether the user opted out under applicable US-state privacy laws.
+  final bool ccpaOptedOut;
+}
+
+/// Resolves the latest privacy choices after UMP completes.
+typedef MediationConsentProvider = Future<MediationConsent> Function();
 
 /// Callback that forwards consent to a single mediation partner.
 ///
-/// [hasGdprConsent] is `true` when the user is outside a GDPR region or has
-/// granted Purpose 1 (storage/access) consent.
+/// [hasGdprConsent] is the value returned by [MediationConsentProvider].
 /// [ccpaOptedOut] is `true` when the user opted out of data sale under CCPA.
-typedef ConsentHandler = Future<void> Function({
-  required bool hasGdprConsent,
-  required bool ccpaOptedOut,
-});
+typedef ConsentHandler =
+    Future<void> Function({
+      required bool hasGdprConsent,
+      required bool ccpaOptedOut,
+    });
 
 /// Forwards the user's consent choices to mediation partners that expose an
 /// explicit privacy API.
 ///
-/// Networks that read the IAB TCF v2 string automatically (Meta, Mintegral,
-/// Pangle, InMobi, Moloco) need no handler. Register handlers for networks
-/// with explicit consent setters — typically Unity, AppLovin, ironSource,
-/// Liftoff Monetize, and DT Exchange:
+/// Some adapters read standard consent strings written by the app's CMP, while
+/// others expose explicit privacy setters. Follow the current integration guide
+/// for every adapter you install. Register a handler only when its guide
+/// requires an explicit call:
 ///
 /// ```dart
 /// import 'package:gma_mediation_unity/gma_mediation_unity.dart';
@@ -32,60 +49,73 @@ typedef ConsentHandler = Future<void> Function({
 /// });
 /// ```
 ///
-/// [syncFromUmp] is called automatically during [AdMobMediation.initialize];
-/// it reads the IAB TCF values UMP persisted and pushes them to every
-/// registered handler.
+/// [sync] is called automatically during `AdMobMediation.initialize` and after
+/// the privacy options form closes. Consent is supplied explicitly because
+/// UMP doesn't expose one universal boolean that is valid for every partner.
 abstract final class MediationConsentBridge {
-  static final List<(String name, ConsentHandler handler)> _handlers = [];
+  static final Map<String, ConsentHandler> _handlers =
+      <String, ConsentHandler>{};
+
+  /// Whether at least one explicit partner consent handler is registered.
+  static bool get hasHandlers => _handlers.isNotEmpty;
 
   /// Register a consent handler for a mediation network.
   ///
   /// Call before [AdMobMediation.initialize] for each network that needs
   /// explicit consent forwarding.
   static void register(String networkName, ConsentHandler handler) {
-    _handlers.add((networkName, handler));
+    final name = networkName.trim();
+    if (name.isEmpty) {
+      throw ArgumentError.value(
+        networkName,
+        'networkName',
+        'Must not be empty.',
+      );
+    }
+    _handlers[name] = handler;
   }
 
-  /// Reads IAB TCF v2 values persisted by UMP and pushes them to all
-  /// registered handlers. Called automatically during initialization.
-  static Future<void> syncFromUmp() async {
+  /// Removes a previously registered handler.
+  static void unregister(String networkName) =>
+      _handlers.remove(networkName.trim());
+
+  /// Pushes [consent] to every registered mediation partner.
+  ///
+  /// Failures are aggregated and thrown so ad initialization fails closed.
+  static Future<void> sync(MediationConsent consent) async {
     if (_handlers.isEmpty) return;
 
-    final prefs = await SharedPreferences.getInstance();
+    final failures = <String, Object>{};
+    await Future.wait(
+      _handlers.entries.map((entry) async {
+        try {
+          await entry.value(
+            hasGdprConsent: consent.hasGdprConsent,
+            ccpaOptedOut: consent.ccpaOptedOut,
+          );
+        } catch (error) {
+          failures[entry.key] = error;
+        }
+      }),
+    );
 
-    // IABTCF_gdprApplies: 1 = user is in a GDPR region.
-    final gdprApplies = prefs.getInt('IABTCF_gdprApplies') == 1;
-    // IABTCF_PurposeConsents: binary string, char 0 = Purpose 1 (storage).
-    final purposeConsents =
-        prefs.getString('IABTCF_PurposeConsents') ?? '';
-    final hasGdprConsent = !gdprApplies ||
-        (purposeConsents.isNotEmpty && purposeConsents[0] == '1');
-
-    // If you serve California users and collect an explicit "Do Not Sell"
-    // choice (e.g. via the AdMob US states message), wire it through here.
-    const ccpaOptedOut = false;
-
-    await Future.wait([
-      for (final (name, handler) in _handlers)
-        _safely(
-          name,
-          () => handler(
-            hasGdprConsent: hasGdprConsent,
-            ccpaOptedOut: ccpaOptedOut,
-          ),
-        ),
-    ]);
-  }
-
-  /// A partner SDK failure must never break the whole consent sync.
-  static Future<void> _safely(
-    String partner,
-    Future<void> Function() action,
-  ) async {
-    try {
-      await action();
-    } catch (e) {
-      debugPrint('[Ads][Consent] Failed to sync consent to $partner: $e');
+    if (failures.isNotEmpty) {
+      throw MediationConsentException(failures);
     }
   }
+
+  @visibleForTesting
+  static void clearHandlers() => _handlers.clear();
+}
+
+/// Indicates that one or more partner privacy APIs rejected consent sync.
+final class MediationConsentException implements Exception {
+  const MediationConsentException(this.failures);
+
+  /// Partner names mapped to their original errors.
+  final Map<String, Object> failures;
+
+  @override
+  String toString() =>
+      'Mediation consent sync failed: ${failures.keys.join(', ')}';
 }

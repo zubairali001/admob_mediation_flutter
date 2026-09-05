@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
@@ -14,7 +12,7 @@ import '../core/full_screen_ad_service.dart';
 class RewardedInterstitialAdService
     extends FullScreenAdService<RewardedInterstitialAd> {
   RewardedInterstitialAdService._()
-    : super(format: AdFormat.rewardedInterstitial, autoPreload: false);
+    : super(format: AdFormat.rewardedInterstitial);
 
   static final RewardedInterstitialAdService instance =
       RewardedInterstitialAdService._();
@@ -29,19 +27,18 @@ class RewardedInterstitialAdService
     required OnUserEarnedRewardCallback onReward,
     VoidCallback? onDismissed,
   }) async {
-    _pendingOnReward = onReward;
-    final shown = await show(onDismissed: onDismissed);
-    if (!shown) {
-      _pendingOnReward = null;
-    }
-    return shown;
+    return show(
+      onDismissed: onDismissed,
+      onWillShow: () => _pendingOnReward = onReward,
+      onFinished: () => _pendingOnReward = null,
+    );
   }
 
   @override
   Future<void> loadPlatformAd() {
     return RewardedInterstitialAd.load(
       adUnitId: adUnitId!,
-      request: const AdRequest(),
+      request: AdsService.instance.config.requestFor(format),
       rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
         onAdLoaded: onAdLoaded,
         onAdFailedToLoad: onAdFailedToLoad,
@@ -56,8 +53,14 @@ class RewardedInterstitialAdService
     await ad.show(
       onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
         emitReward(reward);
-        _pendingOnReward?.call(ad, reward);
+        final callback = _pendingOnReward;
         _pendingOnReward = null;
+        if (callback != null) {
+          invokeSafely(
+            () => callback(ad, reward),
+            'in the rewarded interstitial reward callback',
+          );
+        }
       },
     );
   }

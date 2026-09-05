@@ -39,9 +39,17 @@ class AdsService {
 
   static final AdsService instance = AdsService._();
 
-  final ValueNotifier<AdsStatus> status = ValueNotifier<AdsStatus>(AdsStatus.idle);
+  final ValueNotifier<AdsStatus> status = ValueNotifier<AdsStatus>(
+    AdsStatus.idle,
+  );
+
+  /// Runtime master switch. Disabling it stops loads and prevents shows.
+  final ValueNotifier<bool> adsEnabled = ValueNotifier<bool>(true);
 
   bool get isReady => status.value == AdsStatus.ready;
+
+  /// Whether ad services may currently load or show ads.
+  bool get canServeAds => isReady && adsEnabled.value;
 
   AdsConfig _config = const AdsConfig();
 
@@ -66,25 +74,25 @@ class AdsService {
       final canRequestAds = await ConsentService.instance.gatherConsent(
         debugGeography: _config.debugGeography,
         testDeviceHashedIds: _config.testDeviceIds,
+        underAgeOfConsent: _config.underAgeOfConsent,
       );
       if (!canRequestAds) {
-        debugPrint('[Ads] Consent unavailable — ads disabled for this session.');
+        debugPrint(
+          '[Ads] Consent unavailable — ads disabled for this session.',
+        );
         status.value = AdsStatus.disabled;
         return;
       }
 
       // 2. Mirror consent to mediation partners before their SDKs boot.
-      await MediationConsentBridge.syncFromUmp();
+      await syncMediationConsent();
 
       // 3. Global request configuration.
       await MobileAds.instance.updateRequestConfiguration(
         RequestConfiguration(
           testDeviceIds: _config.testDeviceIds,
           maxAdContentRating: _config.maxAdContentRating,
-          tagForChildDirectedTreatment: _config.childDirected
-              ? TagForChildDirectedTreatment.yes
-              : TagForChildDirectedTreatment.unspecified,
-          tagForUnderAgeOfConsent: TagForUnderAgeOfConsent.unspecified,
+          ageRestrictedTreatment: _config.ageRestrictedTreatment,
         ),
       );
 
@@ -109,6 +117,41 @@ class AdsService {
     return initialize(config: _config);
   }
 
+  /// Re-resolves and forwards explicit consent to registered partner SDKs.
+  Future<void> syncMediationConsent() async {
+    if (!MediationConsentBridge.hasHandlers) return;
+    final provider = _config.mediationConsentProvider;
+    if (provider == null) {
+      throw StateError(
+        'A mediationConsentProvider is required when consent handlers are '
+        'registered.',
+      );
+    }
+    await MediationConsentBridge.sync(await provider());
+  }
+
+  /// Re-checks UMP and partner consent after the privacy form changes.
+  Future<void> refreshConsent() async {
+    if (!await ConsentService.instance.canRequestAds()) {
+      status.value = AdsStatus.disabled;
+      return;
+    }
+
+    try {
+      await syncMediationConsent();
+    } catch (_) {
+      status.value = AdsStatus.disabled;
+      rethrow;
+    }
+
+    if (!isReady) await reinitialize();
+  }
+
+  /// Enables or disables every ad format at runtime.
+  void setAdsEnabled(bool enabled) {
+    if (adsEnabled.value != enabled) adsEnabled.value = enabled;
+  }
+
   /// Opens Google's Ad Inspector overlay — the single best tool to verify
   /// your mediation waterfall on a real device.
   void openAdInspector() {
@@ -123,7 +166,12 @@ class AdsService {
   Future<void> setAppMuted(bool muted) => MobileAds.instance.setAppMuted(muted);
 
   /// 0.0 – 1.0. Reported to networks so video ads respect app volume.
-  Future<void> setAppVolume(double volume) => MobileAds.instance.setAppVolume(volume);
+  Future<void> setAppVolume(double volume) {
+    if (volume < 0 || volume > 1) {
+      throw RangeError.range(volume, 0, 1, 'volume');
+    }
+    return MobileAds.instance.setAppVolume(volume);
+  }
 
   void _logAdapterStatuses(InitializationStatus initStatus) {
     initStatus.adapterStatuses.forEach((adapter, adapterStatus) {

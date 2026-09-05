@@ -1,12 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../ads_service.dart';
 import '../core/ad_events.dart';
+import '../core/retry_policy.dart';
 
 /// Anchored adaptive banner — Google's recommended banner format. It sizes
-/// itself to the device width and reserves its final height immediately so
-/// content never jumps when the ad arrives.
+/// itself to the device width and reserves the resolved height while loading.
 ///
 /// Drop it at the bottom of a screen:
 /// ```dart
@@ -33,12 +35,17 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   AdSize? _adSize;
   bool _isLoaded = false;
   bool _loadFailed = false;
+  bool _isLoading = false;
   Orientation? _loadedForOrientation;
+  Timer? _retryTimer;
+  final RetryPolicy _retry = RetryPolicy();
+  int _loadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    AdsService.instance.status.addListener(_maybeLoad);
+    AdsService.instance.status.addListener(_onAvailabilityChanged);
+    AdsService.instance.adsEnabled.addListener(_onAvailabilityChanged);
   }
 
   @override
@@ -46,7 +53,6 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     super.didChangeDependencies();
     final orientation = MediaQuery.orientationOf(context);
     if (_loadedForOrientation != null && _loadedForOrientation != orientation) {
-      // Reload with the size that fits the new orientation.
       _disposeAd();
     }
     _loadedForOrientation = orientation;
@@ -54,50 +60,74 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   }
 
   Future<void> _maybeLoad() async {
-    if (!mounted || !AdsService.instance.isReady) return;
-    if (_bannerAd != null) return;
+    if (!mounted || !AdsService.instance.canServeAds) return;
+    if (_bannerAd != null || _isLoading) return;
 
     final adUnitId =
         widget.adUnitId ??
         AdsService.instance.config.adUnitIdFor(AdFormat.banner);
     if (adUnitId == null) return;
 
+    _isLoading = true;
+    final generation = ++_loadGeneration;
     final width = MediaQuery.sizeOf(context).width.truncate();
-    final size = await AdSize.getLargeAnchoredAdaptiveBannerAdSize(width);
-    if (!mounted || size == null) return;
+    AdSize? size;
+    try {
+      size = await AdSize.getLargeAnchoredAdaptiveBannerAdSize(width);
+    } catch (error) {
+      _handleLoadFailure(error, generation);
+      return;
+    }
+    if (!_isCurrentLoad(generation)) {
+      if (generation == _loadGeneration) _isLoading = false;
+      return;
+    }
+    if (size == null) {
+      _handleLoadFailure(
+        StateError('Unable to resolve an adaptive banner size.'),
+        generation,
+      );
+      return;
+    }
 
     _emit(AdEventType.requested);
     final banner = BannerAd(
       adUnitId: adUnitId,
       size: size,
-      request: widget.collapsible
-          ? const AdRequest(extras: {'collapsible': 'bottom'})
-          : const AdRequest(),
+      request: AdsService.instance.config.requestFor(
+        AdFormat.banner,
+        extras: widget.collapsible
+            ? const <String, String>{'collapsible': 'bottom'}
+            : null,
+      ),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
+          if (!_isCurrentAd(ad, generation)) {
+            unawaited(ad.dispose());
+            return;
+          }
           _emit(
             AdEventType.loaded,
             adapter: ad.responseInfo?.mediationAdapterClassName,
           );
-          if (!mounted) {
-            ad.dispose();
-            return;
-          }
+          _isLoading = false;
+          _retry.reset();
           setState(() {
             _isLoaded = true;
             _loadFailed = false;
           });
         },
         onAdFailedToLoad: (ad, error) {
+          unawaited(ad.dispose());
+          if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
-          ad.dispose();
-          if (mounted) {
-            setState(() {
-              _bannerAd = null;
-              _isLoaded = false;
-              _loadFailed = true;
-            });
-          }
+          _bannerAd = null;
+          _isLoading = false;
+          setState(() {
+            _isLoaded = false;
+            _loadFailed = true;
+          });
+          _scheduleRetry();
         },
         onAdImpression: (ad) => _emit(AdEventType.impression),
         onAdClicked: (ad) => _emit(AdEventType.clicked),
@@ -113,22 +143,83 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
       ),
     );
 
+    if (!_isCurrentLoad(generation)) {
+      unawaited(banner.dispose());
+      return;
+    }
     setState(() {
       _bannerAd = banner;
       _adSize = size;
     });
-    await banner.load();
+    try {
+      await banner.load();
+    } catch (error) {
+      _handleLoadFailure(error, generation, ad: banner);
+    }
   }
 
   void _disposeAd() {
-    _bannerAd?.dispose();
+    _loadGeneration++;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final ad = _bannerAd;
     _bannerAd = null;
+    _adSize = null;
     _isLoaded = false;
+    _isLoading = false;
+    if (ad != null) unawaited(ad.dispose());
+  }
+
+  void _onAvailabilityChanged() {
+    if (!AdsService.instance.canServeAds) {
+      _disposeAd();
+      if (mounted) setState(() => _loadFailed = false);
+      return;
+    }
+    unawaited(_maybeLoad());
+  }
+
+  void _handleLoadFailure(Object error, int generation, {BannerAd? ad}) {
+    if (ad != null) unawaited(ad.dispose());
+    if (!_isCurrentLoad(generation)) return;
+    _emit(AdEventType.failedToLoad, error: error);
+    _bannerAd = null;
+    _isLoading = false;
+    if (mounted) setState(() => _loadFailed = true);
+    _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    if (!mounted || !AdsService.instance.canServeAds || !_retry.canRetry) {
+      return;
+    }
+    _retryTimer?.cancel();
+    _retryTimer = Timer(_retry.nextDelay(), () => unawaited(_maybeLoad()));
+  }
+
+  bool _isCurrentLoad(int generation) =>
+      mounted &&
+      AdsService.instance.canServeAds &&
+      generation == _loadGeneration;
+
+  bool _isCurrentAd(Ad ad, int generation) =>
+      _isCurrentLoad(generation) && identical(ad, _bannerAd);
+
+  @override
+  void didUpdateWidget(covariant AdaptiveBannerAd oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.adUnitId != widget.adUnitId ||
+        oldWidget.collapsible != widget.collapsible) {
+      _disposeAd();
+      _retry.reset();
+      unawaited(_maybeLoad());
+    }
   }
 
   @override
   void dispose() {
-    AdsService.instance.status.removeListener(_maybeLoad);
+    AdsService.instance.status.removeListener(_onAvailabilityChanged);
+    AdsService.instance.adsEnabled.removeListener(_onAvailabilityChanged);
     _disposeAd();
     super.dispose();
   }

@@ -12,13 +12,14 @@ class InterstitialAdService extends FullScreenAdService<InterstitialAd> {
   static final InterstitialAdService instance = InterstitialAdService._();
 
   @override
-  Duration get minInterval => AdsService.instance.config.interstitialMinInterval;
+  Duration get minInterval =>
+      AdsService.instance.config.interstitialMinInterval;
 
   @override
   Future<void> loadPlatformAd() {
     return InterstitialAd.load(
       adUnitId: adUnitId!,
-      request: const AdRequest(),
+      request: AdsService.instance.config.requestFor(format),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: onAdLoaded,
         onAdFailedToLoad: onAdFailedToLoad,

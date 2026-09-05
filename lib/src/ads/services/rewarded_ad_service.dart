@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import '../ads_service.dart';
 import '../core/ad_events.dart';
 import '../core/full_screen_ad_service.dart';
 
@@ -10,41 +9,28 @@ import '../core/full_screen_ad_service.dart';
 /// earned it (watched enough of the ad) — grant the reward there and
 /// nowhere else.
 class RewardedAdService extends FullScreenAdService<RewardedAd> {
-  RewardedAdService._() : super(format: AdFormat.rewarded, autoPreload: false);
+  RewardedAdService._() : super(format: AdFormat.rewarded);
 
   static final RewardedAdService instance = RewardedAdService._();
 
   OnUserEarnedRewardCallback? _pendingOnReward;
-  int _preloadClients = 0;
-
-  void acquirePreload() {
-    _preloadClients++;
-    if (_preloadClients == 1) startPreloading();
-  }
-
-  void releasePreload() {
-    if (_preloadClients == 0) return;
-    _preloadClients--;
-    if (_preloadClients == 0) unawaited(stopPreloading());
-  }
 
   Future<bool> showWithReward({
     required OnUserEarnedRewardCallback onReward,
     VoidCallback? onDismissed,
   }) async {
-    _pendingOnReward = onReward;
-    final shown = await show(onDismissed: onDismissed);
-    if (!shown) {
-      _pendingOnReward = null;
-    }
-    return shown;
+    return show(
+      onDismissed: onDismissed,
+      onWillShow: () => _pendingOnReward = onReward,
+      onFinished: () => _pendingOnReward = null,
+    );
   }
 
   @override
   Future<void> loadPlatformAd() {
     return RewardedAd.load(
       adUnitId: adUnitId!,
-      request: const AdRequest(),
+      request: AdsService.instance.config.requestFor(format),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: onAdLoaded,
         onAdFailedToLoad: onAdFailedToLoad,
@@ -58,8 +44,14 @@ class RewardedAdService extends FullScreenAdService<RewardedAd> {
     await ad.show(
       onUserEarnedReward: (AdWithoutView ad, RewardItem reward) {
         emitReward(reward);
-        _pendingOnReward?.call(ad, reward);
+        final callback = _pendingOnReward;
         _pendingOnReward = null;
+        if (callback != null) {
+          invokeSafely(
+            () => callback(ad, reward),
+            'in the rewarded ad reward callback',
+          );
+        }
       },
     );
   }

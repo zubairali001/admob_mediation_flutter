@@ -1,4 +1,4 @@
-package com.example.admob_mediation_flutter
+package dev.flutter.example.admob_mediation_example
 
 import io.flutter.embedding.android.FlutterActivity
 

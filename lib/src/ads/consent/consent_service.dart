@@ -26,8 +26,10 @@ class ConsentService {
   Future<bool> gatherConsent({
     DebugGeography? debugGeography,
     List<String> testDeviceHashedIds = const <String>[],
+    bool? underAgeOfConsent,
   }) async {
     final params = ConsentRequestParameters(
+      tagForUnderAgeOfConsent: underAgeOfConsent,
       consentDebugSettings: kDebugMode && debugGeography != null
           ? ConsentDebugSettings(
               debugGeography: debugGeography,
@@ -44,7 +46,9 @@ class ConsentService {
         // it and the user hasn't already answered.
         ConsentForm.loadAndShowConsentFormIfRequired((FormError? error) {
           if (error != null) {
-            debugPrint('[Ads][Consent] Form error ${error.errorCode}: ${error.message}');
+            debugPrint(
+              '[Ads][Consent] Form error ${error.errorCode}: ${error.message}',
+            );
           }
           completer.complete();
         });
@@ -52,7 +56,9 @@ class ConsentService {
       (FormError error) {
         // Network failure etc. Don't block the app: canRequestAds() below
         // falls back to the consent status cached from a previous session.
-        debugPrint('[Ads][Consent] Update error ${error.errorCode}: ${error.message}');
+        debugPrint(
+          '[Ads][Consent] Update error ${error.errorCode}: ${error.message}',
+        );
         completer.complete();
       },
     );
@@ -64,9 +70,13 @@ class ConsentService {
   /// Whether a "Privacy options" entry point (re-open the consent form) must
   /// be offered in your settings screen. Required for EEA/UK users.
   Future<bool> isPrivacyOptionsRequired() async {
-    final status = await ConsentInformation.instance.getPrivacyOptionsRequirementStatus();
+    final status = await ConsentInformation.instance
+        .getPrivacyOptionsRequirementStatus();
     return status == PrivacyOptionsRequirementStatus.required;
   }
+
+  /// Whether UMP currently permits the app to request ads.
+  Future<bool> canRequestAds() => ConsentInformation.instance.canRequestAds();
 
   /// Re-opens the consent form so the user can change their choices.
   Future<void> showPrivacyOptionsForm() async {
@@ -74,6 +84,8 @@ class ConsentService {
     ConsentForm.showPrivacyOptionsForm((FormError? error) {
       if (error != null) {
         debugPrint('[Ads][Consent] Privacy options error: ${error.message}');
+        completer.completeError(error);
+        return;
       }
       completer.complete();
     });
@@ -82,7 +94,9 @@ class ConsentService {
 
   /// Debug-only: wipe consent state so the form shows again on next launch.
   Future<void> resetForTesting() async {
-    assert(kDebugMode, 'resetForTesting must not be called in release builds');
+    if (!kDebugMode) {
+      throw StateError('resetForTesting is only available in debug builds.');
+    }
     ConsentInformation.instance.reset();
   }
 }

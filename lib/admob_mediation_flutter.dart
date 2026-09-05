@@ -1,4 +1,4 @@
-/// Production-ready AdMob mediation for Flutter.
+/// A reusable AdMob mediation service layer for Flutter.
 ///
 /// ```dart
 /// import 'package:admob_mediation_flutter/admob_mediation_flutter.dart';
@@ -15,4 +15,10 @@ export 'src/ads/ads.dart';
 // Re-export types from google_mobile_ads that appear in this package's API
 // so users need only one import for common usage.
 export 'package:google_mobile_ads/google_mobile_ads.dart'
-    show RewardItem, TemplateType, DebugGeography;
+    show
+        AdRequest,
+        AgeRestrictedTreatment,
+        DebugGeography,
+        MaxAdContentRating,
+        RewardItem,
+        TemplateType;

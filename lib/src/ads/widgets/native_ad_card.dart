@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../ads_service.dart';
 import '../core/ad_events.dart';
+import '../core/retry_policy.dart';
 
 /// Native ad rendered with Google's built-in templates — no platform-side
 /// factory code needed. Use [TemplateType.small] inside lists and
@@ -33,13 +36,18 @@ class _NativeAdCardState extends State<NativeAdCard> {
   NativeAd? _nativeAd;
   bool _isLoaded = false;
   bool _loadFailed = false;
+  bool _isLoading = false;
+  Timer? _retryTimer;
+  final RetryPolicy _retry = RetryPolicy();
+  int _loadGeneration = 0;
 
   double get _height => widget.template == TemplateType.small ? 120 : 350;
 
   @override
   void initState() {
     super.initState();
-    AdsService.instance.status.addListener(_maybeLoad);
+    AdsService.instance.status.addListener(_onAvailabilityChanged);
+    AdsService.instance.adsEnabled.addListener(_onAvailabilityChanged);
   }
 
   @override
@@ -51,17 +59,20 @@ class _NativeAdCardState extends State<NativeAdCard> {
   }
 
   void _maybeLoad() {
-    if (!mounted || !AdsService.instance.isReady || _nativeAd != null) return;
+    if (!mounted || !AdsService.instance.canServeAds) return;
+    if (_nativeAd != null || _isLoading) return;
     final adUnitId =
         widget.adUnitId ??
         AdsService.instance.config.adUnitIdFor(AdFormat.native);
     if (adUnitId == null) return;
 
+    _isLoading = true;
+    final generation = ++_loadGeneration;
     _emit(AdEventType.requested);
     final colorScheme = Theme.of(context).colorScheme;
     _nativeAd = NativeAd(
       adUnitId: adUnitId,
-      request: const AdRequest(),
+      request: AdsService.instance.config.requestFor(AdFormat.native),
       nativeAdOptions: NativeAdOptions(
         // Videos start muted — required UX courtesy, and networks reward it.
         videoOptions: VideoOptions(startMuted: true),
@@ -94,26 +105,32 @@ class _NativeAdCardState extends State<NativeAdCard> {
       ),
       listener: NativeAdListener(
         onAdLoaded: (ad) {
+          if (!_isCurrentAd(ad, generation)) {
+            unawaited(ad.dispose());
+            return;
+          }
           _emit(
             AdEventType.loaded,
             adapter: ad.responseInfo?.mediationAdapterClassName,
           );
-          if (!mounted) {
-            ad.dispose();
-            return;
-          }
-          setState(() => _isLoaded = true);
+          _isLoading = false;
+          _retry.reset();
+          setState(() {
+            _isLoaded = true;
+            _loadFailed = false;
+          });
         },
         onAdFailedToLoad: (ad, error) {
+          unawaited(ad.dispose());
+          if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
-          ad.dispose();
-          if (mounted) {
-            setState(() {
-              _nativeAd = null;
-              _isLoaded = false;
-              _loadFailed = true;
-            });
-          }
+          _nativeAd = null;
+          _isLoading = false;
+          setState(() {
+            _isLoaded = false;
+            _loadFailed = true;
+          });
+          _scheduleRetry();
         },
         onAdImpression: (ad) => _emit(AdEventType.impression),
         onAdClicked: (ad) => _emit(AdEventType.clicked),
@@ -128,13 +145,76 @@ class _NativeAdCardState extends State<NativeAdCard> {
         ),
       ),
     );
-    _nativeAd!.load();
+    unawaited(
+      _nativeAd!.load().catchError((Object error) {
+        _handleLoadFailure(error, generation);
+      }),
+    );
+  }
+
+  void _onAvailabilityChanged() {
+    if (!AdsService.instance.canServeAds) {
+      _disposeAd();
+      if (mounted) setState(() => _loadFailed = false);
+      return;
+    }
+    _maybeLoad();
+  }
+
+  void _disposeAd() {
+    _loadGeneration++;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final ad = _nativeAd;
+    _nativeAd = null;
+    _isLoaded = false;
+    _isLoading = false;
+    if (ad != null) unawaited(ad.dispose());
+  }
+
+  void _handleLoadFailure(Object error, int generation) {
+    if (!_isCurrentLoad(generation)) return;
+    final ad = _nativeAd;
+    _nativeAd = null;
+    _isLoading = false;
+    if (ad != null) unawaited(ad.dispose());
+    _emit(AdEventType.failedToLoad, error: error);
+    if (mounted) setState(() => _loadFailed = true);
+    _scheduleRetry();
+  }
+
+  void _scheduleRetry() {
+    if (!mounted || !AdsService.instance.canServeAds || !_retry.canRetry) {
+      return;
+    }
+    _retryTimer?.cancel();
+    _retryTimer = Timer(_retry.nextDelay(), _maybeLoad);
+  }
+
+  bool _isCurrentLoad(int generation) =>
+      mounted &&
+      AdsService.instance.canServeAds &&
+      generation == _loadGeneration;
+
+  bool _isCurrentAd(Ad ad, int generation) =>
+      _isCurrentLoad(generation) && identical(ad, _nativeAd);
+
+  @override
+  void didUpdateWidget(covariant NativeAdCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.adUnitId != widget.adUnitId ||
+        oldWidget.template != widget.template) {
+      _disposeAd();
+      _retry.reset();
+      _maybeLoad();
+    }
   }
 
   @override
   void dispose() {
-    AdsService.instance.status.removeListener(_maybeLoad);
-    _nativeAd?.dispose();
+    AdsService.instance.status.removeListener(_onAvailabilityChanged);
+    AdsService.instance.adsEnabled.removeListener(_onAvailabilityChanged);
+    _disposeAd();
     super.dispose();
   }
 

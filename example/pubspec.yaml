@@ -1,0 +1,19 @@
+name: admob_mediation_example
+description: Demonstrates admob_mediation_flutter with Google's test ads.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+dependencies:
+  admob_mediation_flutter:
+    path: ../
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

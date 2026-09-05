@@ -1,11 +1,12 @@
 name: admob_mediation_flutter
 description: >-
-  Production-ready AdMob mediation for Flutter. One-call initialization with
-  UMP consent, pre-loading, retry backoff, frequency caps, and an analytics
-  event bus. Supports all ad formats and any combination of mediation networks.
-version: 1.0.0
+  An unofficial Flutter service layer for AdMob mediation with UMP consent,
+  preloading, retry backoff, frequency caps, ad widgets, and revenue events.
+version: 0.1.0
 
+homepage: https://github.com/zubairali001/admob_mediation_flutter
 repository: https://github.com/zubairali001/admob_mediation_flutter
+issue_tracker: https://github.com/zubairali001/admob_mediation_flutter/issues
 topics:
   - ads
   - admob
@@ -13,15 +14,18 @@ topics:
   - monetization
   - google-mobile-ads
 
+platforms:
+  android:
+  ios:
+
 environment:
-  sdk: ^3.5.0
-  flutter: ">=3.22.0"
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
 
 dependencies:
   flutter:
     sdk: flutter
-  google_mobile_ads: ^8.0.0
-  shared_preferences: ^2.5.5
+  google_mobile_ads: ^9.1.0
 
 dev_dependencies:
   flutter_test:

@@ -16,8 +16,8 @@ import 'services/rewarded_interstitial_ad_service.dart';
 /// The single public entry point of the ads stack — use this like a package.
 ///
 /// ```dart
-/// // 1. Initialize once (non-blocking; runs consent + SDK boot):
-/// AdMobMediation.initialize(
+/// // 1. Initialize once before requesting ads:
+/// await AdMobMediation.initialize(
 ///   config: AdsConfig(
 ///     interstitial: AdUnitId(android: 'ca-app-pub-x/a', ios: 'ca-app-pub-x/b'),
 ///     rewarded: AdUnitId(android: 'ca-app-pub-x/c'),
@@ -41,12 +41,12 @@ abstract final class AdMobMediation {
   /// request configuration → Mobile Ads SDK + all mediation adapters.
   ///
   /// Safe to call multiple times (subsequent calls await the first run).
-  /// Interstitial and app-open services warm up when the SDK is ready.
-  /// Rewarded formats are loaded only when explicitly requested.
+  /// Every configured format preloads when the SDK is ready.
   static Future<void> initialize({AdsConfig config = const AdsConfig()}) {
     final future = AdsService.instance.initialize(config: config);
-    // Only always-on formats subscribe to the ready signal at startup.
     InterstitialAdService.instance;
+    RewardedAdService.instance;
+    RewardedInterstitialAdService.instance;
     AppOpenAdService.instance.listenToAppForeground();
     return future;
   }
@@ -58,6 +58,9 @@ abstract final class AdMobMediation {
   static ValueListenable<AdsStatus> get status => AdsService.instance.status;
 
   static bool get isReady => AdsService.instance.isReady;
+
+  /// Whether ads are allowed to load and show at runtime.
+  static ValueListenable<bool> get adsEnabled => AdsService.instance.adsEnabled;
 
   /// Every ad event (loaded/shown/clicked/revenue/...) from every format.
   /// Attach your analytics here, once.
@@ -94,17 +97,8 @@ abstract final class AdMobMediation {
     onDismissed: onDismissed,
   );
 
-  static Future<void> loadRewarded() {
-    final service = RewardedAdService.instance;
-    service.startPreloading();
-    return service.load();
-  }
-
-  static void acquireRewardedPreload() =>
-      RewardedAdService.instance.acquirePreload();
-
-  static void releaseRewardedPreload() =>
-      RewardedAdService.instance.releasePreload();
+  /// Explicit preload; configured rewarded ads also preload automatically.
+  static Future<void> loadRewarded() => RewardedAdService.instance.load();
 
   static ValueListenable<bool> get isRewardedReady =>
       RewardedAdService.instance.isAdReady;
@@ -121,11 +115,9 @@ abstract final class AdMobMediation {
     onDismissed: onDismissed,
   );
 
-  static Future<void> loadRewardedInterstitial() {
-    final service = RewardedInterstitialAdService.instance;
-    service.startPreloading();
-    return service.load();
-  }
+  /// Explicit preload; configured rewarded interstitials also preload automatically.
+  static Future<void> loadRewardedInterstitial() =>
+      RewardedInterstitialAdService.instance.load();
 
   static ValueListenable<bool> get isRewardedInterstitialReady =>
       RewardedInterstitialAdService.instance.isAdReady;
@@ -137,7 +129,8 @@ abstract final class AdMobMediation {
   /// Manually show an app open ad (e.g. on cold start after a splash).
   /// With `AdsConfig.autoShowAppOpenOnResume` (default true) one also shows
   /// automatically whenever the app returns to the foreground.
-  static Future<bool> showAppOpen() => AppOpenAdService.instance.show();
+  static Future<bool> showAppOpen({VoidCallback? onDismissed}) =>
+      AppOpenAdService.instance.show(onDismissed: onDismissed);
 
   static Future<void> loadAppOpen() => AppOpenAdService.instance.load();
 
@@ -165,13 +158,16 @@ abstract final class AdMobMediation {
   /// Register a consent handler for a mediation network that needs explicit
   /// consent forwarding. Call before [initialize].
   ///
-  /// Networks that read the IAB TCF string automatically (Meta, Mintegral,
-  /// Pangle, InMobi, Moloco) need no handler. See [MediationConsentBridge]
-  /// for which networks need one and how to write the handler.
+  /// Follow the current privacy guide for each installed adapter. Some read
+  /// standard consent strings automatically; others require this explicit hook.
   static void registerConsentHandler(
     String networkName,
     ConsentHandler handler,
   ) => MediationConsentBridge.register(networkName, handler);
+
+  /// Removes a registered explicit partner consent handler.
+  static void unregisterConsentHandler(String networkName) =>
+      MediationConsentBridge.unregister(networkName);
 
   // ------------------------------------------------------------------
   // Consent / privacy
@@ -182,8 +178,10 @@ abstract final class AdMobMediation {
       ConsentService.instance.isPrivacyOptionsRequired();
 
   /// Re-opens the consent form so the user can change their choices.
-  static Future<void> showPrivacyOptionsForm() =>
-      ConsentService.instance.showPrivacyOptionsForm();
+  static Future<void> showPrivacyOptionsForm() async {
+    await ConsentService.instance.showPrivacyOptionsForm();
+    await AdsService.instance.refreshConsent();
+  }
 
   // ------------------------------------------------------------------
   // Utilities
@@ -197,4 +195,11 @@ abstract final class AdMobMediation {
 
   static Future<void> setAppVolume(double volume) =>
       AdsService.instance.setAppVolume(volume);
+
+  /// Runtime master switch for subscriptions, account changes, and testing.
+  ///
+  /// Setting this to false prevents shows, cancels retries, and disposes cached
+  /// ads. Re-enabling resumes preloading for configured formats.
+  static void setAdsEnabled(bool enabled) =>
+      AdsService.instance.setAdsEnabled(enabled);
 }
