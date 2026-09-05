@@ -1,0 +1,14 @@
+/.github/
+/android/
+/ios/
+/build/
+/coverage/
+/doc/
+/example/.dart_tool/
+/example/.idea/
+/example/build/
+/example/pubspec.lock
+*.iml
+pubspec.lock
+.dart_tool/
+.claude/
