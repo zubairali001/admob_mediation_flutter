@@ -26,7 +26,8 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   FullScreenAdService({
     required this.format,
     this.ttl = const Duration(hours: 1),
-  }) {
+    bool autoPreload = true,
+  }) : _preloadEnabled = autoPreload {
     AdsService.instance.status.addListener(_onAdsStatusChanged);
     _onAdsStatusChanged();
   }
@@ -53,6 +54,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   bool _isLoading = false;
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
+  bool _preloadEnabled;
 
   // ------------------------------------------------------------------
   // Subclass contract
@@ -84,9 +86,26 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
     return DateTime.now().difference(_loadedAt!) < ttl;
   }
 
+  /// Enables automatic loading and keeps the next ad warm after a show.
+  void startPreloading() {
+    if (_preloadEnabled) return;
+    _preloadEnabled = true;
+    _onAdsStatusChanged();
+  }
+
+  /// Stops retries and releases any cached ad after demand ends.
+  Future<void> stopPreloading() async {
+    if (!_preloadEnabled) return;
+    _preloadEnabled = false;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _retry.reset();
+    await _discardCachedAd();
+  }
+
   /// Loads an ad if none is cached and none is in flight. Safe to call often.
   Future<void> load() async {
-    if (!AdsService.instance.isReady || _isLoading) return;
+    if (!_preloadEnabled || !AdsService.instance.isReady || _isLoading) return;
     if (isAdAvailable || adUnitId == null) return;
     await _discardCachedAd();
 
@@ -134,6 +153,11 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
 
   @protected
   void onAdLoaded(T ad) {
+    if (!_preloadEnabled) {
+      _isLoading = false;
+      unawaited(disposePlatformAd(ad));
+      return;
+    }
     _ad = ad;
     _loadedAt = DateTime.now();
     _isLoading = false;
@@ -147,7 +171,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   void onAdFailedToLoad(LoadAdError error) {
     _isLoading = false;
     _emit(AdEventType.failedToLoad, error: error);
-    if (_retry.canRetry) {
+    if (_preloadEnabled && _retry.canRetry) {
       _retryTimer?.cancel();
       _retryTimer = Timer(_retry.nextDelay(), load);
     }
@@ -190,14 +214,14 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   void _onAdsStatusChanged() {
     // Warm up as soon as the SDK is ready — this is the "subscribe and work
     // when needed" hook: no service issues a single call before this fires.
-    if (AdsService.instance.isReady) load();
+    if (_preloadEnabled && AdsService.instance.isReady) load();
   }
 
   void _finishShow() {
     final callback = _pendingOnDismissed;
     _pendingOnDismissed = null;
     callback?.call();
-    unawaited(load()); // Pre-load the next one right away.
+    if (_preloadEnabled) unawaited(load());
   }
 
   bool get _isIntervalElapsed {

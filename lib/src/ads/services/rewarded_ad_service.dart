@@ -10,11 +10,23 @@ import '../core/full_screen_ad_service.dart';
 /// earned it (watched enough of the ad) — grant the reward there and
 /// nowhere else.
 class RewardedAdService extends FullScreenAdService<RewardedAd> {
-  RewardedAdService._() : super(format: AdFormat.rewarded);
+  RewardedAdService._() : super(format: AdFormat.rewarded, autoPreload: false);
 
   static final RewardedAdService instance = RewardedAdService._();
 
   OnUserEarnedRewardCallback? _pendingOnReward;
+  int _preloadClients = 0;
+
+  void acquirePreload() {
+    _preloadClients++;
+    if (_preloadClients == 1) startPreloading();
+  }
+
+  void releasePreload() {
+    if (_preloadClients == 0) return;
+    _preloadClients--;
+    if (_preloadClients == 0) unawaited(stopPreloading());
+  }
 
   Future<bool> showWithReward({
     required OnUserEarnedRewardCallback onReward,

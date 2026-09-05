@@ -1,85 +1,87 @@
 import 'package:flutter/foundation.dart';
-import 'package:gma_mediation_applovin/gma_mediation_applovin.dart';
-import 'package:gma_mediation_dtexchange/gma_mediation_dtexchange.dart';
-import 'package:gma_mediation_ironsource/gma_mediation_ironsource.dart';
-import 'package:gma_mediation_liftoffmonetize/gma_mediation_liftoffmonetize.dart';
-import 'package:gma_mediation_unity/gma_mediation_unity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Forwards the user's consent choices to mediation partners that expose a
-/// manual privacy API.
+/// Callback that forwards consent to a single mediation partner.
 ///
-/// Modern partner SDKs (and all TCF-certified ones: Meta, Mintegral, Pangle,
-/// InMobi read the IAB TCF string written by UMP automatically), but Unity,
-/// AppLovin, ironSource, Liftoff and DT Exchange still offer explicit
-/// setters — forwarding keeps fill rates healthy on older SDK behaviors and
-/// covers CCPA/LGPD signals the TCF string doesn't carry.
-///
-/// Call [syncFromUmp] right after the UMP consent flow completes and before
-/// `MobileAds.instance.initialize()`.
-class MediationConsentBridge {
-  MediationConsentBridge._();
+/// [hasGdprConsent] is `true` when the user is outside a GDPR region or has
+/// granted Purpose 1 (storage/access) consent.
+/// [ccpaOptedOut] is `true` when the user opted out of data sale under CCPA.
+typedef ConsentHandler = Future<void> Function({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+});
 
-  /// Reads the IAB TCF v2 values UMP persisted in platform preferences
-  /// (SharedPreferences / NSUserDefaults) and pushes them to the partners.
+/// Forwards the user's consent choices to mediation partners that expose an
+/// explicit privacy API.
+///
+/// Networks that read the IAB TCF v2 string automatically (Meta, Mintegral,
+/// Pangle, InMobi, Moloco) need no handler. Register handlers for networks
+/// with explicit consent setters — typically Unity, AppLovin, ironSource,
+/// Liftoff Monetize, and DT Exchange:
+///
+/// ```dart
+/// import 'package:gma_mediation_unity/gma_mediation_unity.dart';
+///
+/// MediationConsentBridge.register('Unity', ({
+///   required bool hasGdprConsent,
+///   required bool ccpaOptedOut,
+/// }) async {
+///   final unity = GmaMediationUnity();
+///   await unity.setGDPRConsent(hasGdprConsent);
+///   await unity.setCCPAConsent(!ccpaOptedOut);
+/// });
+/// ```
+///
+/// [syncFromUmp] is called automatically during [AdMobMediation.initialize];
+/// it reads the IAB TCF values UMP persisted and pushes them to every
+/// registered handler.
+abstract final class MediationConsentBridge {
+  static final List<(String name, ConsentHandler handler)> _handlers = [];
+
+  /// Register a consent handler for a mediation network.
+  ///
+  /// Call before [AdMobMediation.initialize] for each network that needs
+  /// explicit consent forwarding.
+  static void register(String networkName, ConsentHandler handler) {
+    _handlers.add((networkName, handler));
+  }
+
+  /// Reads IAB TCF v2 values persisted by UMP and pushes them to all
+  /// registered handlers. Called automatically during initialization.
   static Future<void> syncFromUmp() async {
+    if (_handlers.isEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
 
     // IABTCF_gdprApplies: 1 = user is in a GDPR region.
     final gdprApplies = prefs.getInt('IABTCF_gdprApplies') == 1;
     // IABTCF_PurposeConsents: binary string, char 0 = Purpose 1 (storage).
-    final purposeConsents = prefs.getString('IABTCF_PurposeConsents') ?? '';
-    final hasGdprConsent =
-        !gdprApplies || (purposeConsents.isNotEmpty && purposeConsents[0] == '1');
+    final purposeConsents =
+        prefs.getString('IABTCF_PurposeConsents') ?? '';
+    final hasGdprConsent = !gdprApplies ||
+        (purposeConsents.isNotEmpty && purposeConsents[0] == '1');
 
     // If you serve California users and collect an explicit "Do Not Sell"
     // choice (e.g. via the AdMob US states message), wire it through here.
     const ccpaOptedOut = false;
 
-    await applyConsent(hasGdprConsent: hasGdprConsent, ccpaOptedOut: ccpaOptedOut);
-  }
-
-  /// Pushes explicit consent flags to every partner with a privacy API.
-  static Future<void> applyConsent({
-    required bool hasGdprConsent,
-    required bool ccpaOptedOut,
-  }) async {
-    // "1YNN" / "1YYN": IAB US privacy string (version, notice given,
-    // opted out of sale, LSPA).
-    final usPrivacyString = ccpaOptedOut ? '1YYN' : '1YNN';
-
-    await Future.wait<void>([
-      _safely('Unity', () async {
-        final unity = GmaMediationUnity();
-        await unity.setGDPRConsent(hasGdprConsent);
-        await unity.setCCPAConsent(!ccpaOptedOut);
-      }),
-      _safely('AppLovin', () async {
-        final appLovin = GmaMediationApplovin();
-        await appLovin.setHasUserConsent(hasGdprConsent);
-        await appLovin.setDoNotSell(ccpaOptedOut);
-      }),
-      _safely('ironSource', () async {
-        final ironSource = GmaMediationIronsource();
-        await ironSource.setConsent(hasGdprConsent);
-        await ironSource.setDoNotSell(ccpaOptedOut);
-      }),
-      _safely('Liftoff Monetize', () async {
-        final liftoff = GmaMediationLiftoffmonetize();
-        await liftoff.setGDPRStatus(hasGdprConsent, null);
-        await liftoff.setCCPAStatus(!ccpaOptedOut);
-      }),
-      _safely('DT Exchange', () async {
-        final dtExchange = GmaMediationDTExchange();
-        await dtExchange.setUSPrivacyString(usPrivacyString);
-        // DT Exchange treats LGPD (Brazil) separately; we mirror GDPR consent.
-        await dtExchange.setLgpdConsent(hasGdprConsent);
-      }),
+    await Future.wait([
+      for (final (name, handler) in _handlers)
+        _safely(
+          name,
+          () => handler(
+            hasGdprConsent: hasGdprConsent,
+            ccpaOptedOut: ccpaOptedOut,
+          ),
+        ),
     ]);
   }
 
   /// A partner SDK failure must never break the whole consent sync.
-  static Future<void> _safely(String partner, Future<void> Function() action) async {
+  static Future<void> _safely(
+    String partner,
+    Future<void> Function() action,
+  ) async {
     try {
       await action();
     } catch (e) {

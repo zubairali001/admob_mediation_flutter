@@ -1,211 +1,270 @@
-# AdMob Mediation — Flutter
+# admob_mediation_flutter
 
-Production-grade AdMob mediation stack for Flutter. Every ad format, full
-consent handling (UMP / GDPR / ATT), 9 mediation networks, and a lazy,
-service-based architecture where nothing loads until it is allowed to and
-needed.
+Production-ready AdMob mediation for Flutter. One-call initialization with
+UMP/GDPR consent, pre-loading, retry backoff, frequency caps, and an
+analytics event bus — every ad format, any combination of mediation networks.
 
-## What's included
+## Features
 
-| Piece | File |
-|---|---|
-| Orchestrator (consent → adapters → SDK init) | `lib/src/ads/ads_service.dart` |
-| UMP consent (GDPR form, privacy options) | `lib/src/ads/consent/consent_service.dart` |
-| Consent forwarding to mediation partners | `lib/src/ads/consent/mediation_consent_bridge.dart` |
-| Generic full-screen ad engine (preload, retry backoff, TTL, frequency caps) | `lib/src/ads/core/full_screen_ad_service.dart` |
-| App open ads (auto-show on foreground) | `lib/src/ads/services/app_open_ad_service.dart` |
-| Interstitial ads | `lib/src/ads/services/interstitial_ad_service.dart` |
-| Rewarded ads | `lib/src/ads/services/rewarded_ad_service.dart` |
-| Rewarded interstitial ads | `lib/src/ads/services/rewarded_interstitial_ad_service.dart` |
-| Anchored adaptive banner widget (+ collapsible option) | `lib/src/ads/widgets/adaptive_banner_ad.dart` |
-| Native ad widget (Google templates) | `lib/src/ads/widgets/native_ad_card.dart` |
-| Public facade — one function per ad format | `lib/src/ads/admob_mediation.dart` |
-| Config object (ad unit ids + all options, auto test ids in debug) | `lib/src/ads/ads_config.dart` |
-| Analytics event bus (incl. impression-level revenue) | `lib/src/ads/core/ad_events.dart` |
+- **Every ad format**: interstitial, rewarded, rewarded interstitial, app open,
+  adaptive banner (collapsible), native (template-based).
+- **Full consent handling**: UMP/GDPR flow runs before any ad request;
+  pluggable consent forwarding for partner SDKs.
+- **Pre-loading & retry**: full-screen ads keep one warm ad cached, retry
+  no-fills with exponential backoff, expire stale ads (1h / 4h for app open).
+- **Frequency caps**: configurable per-format minimum interval + global
+  "one full-screen at a time" lock.
+- **Analytics event bus**: every lifecycle event (loaded, shown, clicked,
+  dismissed, reward earned, impression-level revenue) in one stream.
+- **Automatic test IDs**: Google test ad unit IDs in debug builds — zero
+  config to start testing.
+- **Mediation networks are optional**: add only the `gma_mediation_*`
+  packages you need — the core package doesn't force any.
 
-### Mediation networks bundled
+## Getting started
 
-Unity Ads, Meta Audience Network, AppLovin, Mintegral, Pangle, ironSource,
-Liftoff Monetize (Vungle), InMobi, DT Exchange, Moloco — via Google's
-official `gma_mediation_*` Flutter packages, so the native adapter versions
-on Android and iOS are managed for you. This is every official Flutter
-adapter Google publishes.
+### 1. Add the package
 
-## How the architecture works
+```yaml
+dependencies:
+  admob_mediation_flutter: ^1.0.0
 
-```
-main()
- └─ AdsService.initialize()            ← runs async, never blocks first frame
-     1. ConsentService.gatherConsent() ← UMP form if required (GDPR/US states)
-     2. MediationConsentBridge         ← forwards consent to partner SDKs
-     3. RequestConfiguration           ← test devices, COPPA, content rating
-     4. MobileAds.initialize()         ← boots SDK + all 9 adapters
-     └─ status → AdsStatus.ready
-
-Each ad service/widget subscribes to AdsService.status.
-Nothing loads before "ready"; everything pre-loads itself after.
-Full-screen services keep one warm ad each, retry no-fills with
-exponential backoff, expire stale ads (1h / 4h for app open), and share
-a global "one full-screen ad at a time" lock + frequency caps.
+  # Add only the mediation networks you want:
+  gma_mediation_unity: ^1.8.0
+  gma_mediation_meta: ^1.5.2
+  gma_mediation_applovin: ^2.6.1
+  # gma_mediation_mintegral: ^2.1.0
+  # gma_mediation_pangle: ^3.6.0
+  # gma_mediation_ironsource: ^2.4.1
+  # gma_mediation_liftoffmonetize: ^1.5.0
+  # gma_mediation_inmobi: ^2.1.0
+  # gma_mediation_dtexchange: ^1.3.4
+  # gma_mediation_moloco: ^3.4.0
 ```
 
-Usage — everything goes through the `AdMobMediation` facade:
+### 2. Platform setup
+
+**Android** — set your AdMob App ID in `android/app/src/main/AndroidManifest.xml`:
+
+```xml
+<meta-data
+    android:name="com.google.android.gms.ads.APPLICATION_ID"
+    android:value="ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"/>
+```
+
+If you use **Mintegral** or **Pangle**, add their Maven repos in
+`android/build.gradle.kts` (or `build.gradle`) under `allprojects.repositories`:
+
+```kotlin
+allprojects {
+    repositories {
+        // Mintegral
+        maven { url = uri("https://dl-maven-android.mintegral.com/repository/mbridge_android_sdk_oversea") }
+        // Pangle
+        maven { url = uri("https://artifact.bytedance.com/repository/pangle") }
+    }
+}
+```
+
+**iOS** — set your AdMob App ID in `ios/Runner/Info.plist`:
+
+```xml
+<key>GADApplicationIdentifier</key>
+<string>ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY</string>
+```
+
+Set the minimum iOS version to 14.0+ in `ios/Podfile`:
+
+```ruby
+platform :ios, '14.0'
+```
+
+Then run `pod install --repo-update` in `ios/`.
+
+### 3. Initialize
 
 ```dart
-// 1. Manual initialization, all parameters in one config object:
-await AdMobMediation.initialize(
-  config: const AdsConfig(
-    interstitial: AdUnitId(android: 'ca-app-pub-x/a', ios: 'ca-app-pub-x/b'),
-    rewarded: AdUnitId(android: 'ca-app-pub-x/c', ios: 'ca-app-pub-x/d'),
-    appOpen: AdUnitId(android: 'ca-app-pub-x/e', ios: 'ca-app-pub-x/f'),
-    banner: AdUnitId(android: 'ca-app-pub-x/g', ios: 'ca-app-pub-x/h'),
-    native: AdUnitId(android: 'ca-app-pub-x/i', ios: 'ca-app-pub-x/j'),
-    rewardedInterstitial: AdUnitId(android: 'ca-app-pub-x/k'),
-    testDeviceIds: ['HASHED-DEVICE-ID'],
-    interstitialMinInterval: Duration(seconds: 60),
-    autoShowAppOpenOnResume: true,
-  ),
-);
+import 'package:admob_mediation_flutter/admob_mediation_flutter.dart';
 
-// 2. One function per format:
-await AdMobMediation.showInterstitial(onDismissed: goNext);
-await AdMobMediation.showRewarded(onReward: (r) => wallet.add(r.amount.toInt()));
-await AdMobMediation.showRewardedInterstitial(onReward: (r) => ...);
-await AdMobMediation.showAppOpen();          // manual (auto-show also built in)
-AdMobMediation.skipNextAppOpen();            // before payment/picker flows
-AdMobMediation.isInterstitialReady;          // ValueListenable<bool> for UI
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-// 3. Banner / native are widgets (optional per-instance adUnitId override):
-Scaffold(bottomNavigationBar: const AdaptiveBannerAd());
-const NativeAdCard(template: TemplateType.medium, adUnitId: '...');
+  // Optional: register consent handlers for networks that need them
+  // (see "Mediation consent" below).
 
-// 4. Consent + utilities:
-await AdMobMediation.isPrivacyOptionsRequired();
-await AdMobMediation.showPrivacyOptionsForm();
-AdMobMediation.openAdInspector();
-AdMobMediation.events.listen((e) { /* analytics, incl. revenue */ });
+  await AdMobMediation.initialize(
+    config: const AdsConfig(
+      interstitial: AdUnitId(android: 'ca-app-pub-xxx/aaa', ios: 'ca-app-pub-xxx/bbb'),
+      rewarded:     AdUnitId(android: 'ca-app-pub-xxx/ccc', ios: 'ca-app-pub-xxx/ddd'),
+      banner:       AdUnitId(android: 'ca-app-pub-xxx/eee', ios: 'ca-app-pub-xxx/fff'),
+      appOpen:      AdUnitId(android: 'ca-app-pub-xxx/ggg', ios: 'ca-app-pub-xxx/hhh'),
+      native:       AdUnitId(android: 'ca-app-pub-xxx/iii', ios: 'ca-app-pub-xxx/jjj'),
+    ),
+  );
+
+  runApp(const MyApp());
+}
 ```
 
-In **debug builds Google test ids are used automatically** (any ids you pass
-are ignored until release; `--dart-define=FORCE_TEST_ADS=true` keeps test ads
-in release QA builds). Also replace the Android app id in
-`android/app/src/main/AndroidManifest.xml` and the iOS app id in
-`ios/Runner/Info.plist`.
+In **debug builds** Google test IDs replace yours automatically — just run
+the app and ads work out of the box.
 
----
+## Usage
 
-# AdMob dashboard — complete setup checklist
+```dart
+// Full-screen ads — returns false if not ready or frequency-capped
+await AdMobMediation.showInterstitial(onDismissed: goNext);
 
-## 1. Create the apps
+await AdMobMediation.showRewarded(
+  onReward: (reward) => wallet.add(reward.amount.toInt()),
+);
 
-1. Go to [apps.admob.com](https://apps.admob.com) → **Apps → Add app**.
-2. Do this twice: once for **Android**, once for **iOS** (each platform is a
-   separate AdMob app with its own App ID and ad units).
-3. Copy each **App ID** (`ca-app-pub-…~…`):
-   - Android → `AndroidManifest.xml` → `com.google.android.gms.ads.APPLICATION_ID`
-   - iOS → `Info.plist` → `GADApplicationIdentifier`
+await AdMobMediation.showRewardedInterstitial(
+  onReward: (reward) => grantBonus(reward),
+);
 
-## 2. Create the ad units (per platform)
+await AdMobMediation.showAppOpen(); // also auto-shows on foreground by default
 
-**Apps → your app → Ad units → Add ad unit**, one of each:
+// Suppress app-open before flows that leave the app (payments, sign-in)
+AdMobMediation.skipNextAppOpen();
 
-| Ad unit | Paste into `AdsConfig` parameter |
-|---|---|
-| App open | `appOpen: AdUnitId(...)` |
-| Banner (anchored adaptive) | `banner: AdUnitId(...)` |
-| Interstitial | `interstitial: AdUnitId(...)` |
-| Rewarded | `rewarded: AdUnitId(...)` |
-| Rewarded interstitial | `rewardedInterstitial: AdUnitId(...)` |
-| Native advanced | `native: AdUnitId(...)` |
+// Widgets — drop anywhere
+const AdaptiveBannerAd()                          // anchored adaptive banner
+const AdaptiveBannerAd(collapsible: true)          // collapsible variant
+const NativeAdCard(template: TemplateType.medium)  // native template ad
 
-## 3. Privacy & messaging (required for EEA/UK)
+// Readiness — bind to UI (e.g. enable/disable a "Watch ad" button)
+ValueListenableBuilder<bool>(
+  valueListenable: AdMobMediation.isRewardedReady,
+  builder: (_, ready, __) => ElevatedButton(
+    onPressed: ready ? showRewardedAd : null,
+    child: Text(ready ? 'Watch ad' : 'Loading...'),
+  ),
+)
 
-1. **Privacy & messaging → GDPR** → create a **GDPR message** for both apps,
-   review the ad-partner list, publish it.
-2. Optionally create a **US states** message (CCPA) and an **iOS ATT/IDFA
-   explainer** message.
-3. The app already runs the UMP flow on launch — the form appears
-   automatically for users in regions that require it.
+// Analytics — impression-level revenue, ad lifecycle
+AdMobMediation.events.listen((e) {
+  if (e.type == AdEventType.paid) {
+    analytics.logAdRevenue(value: e.revenue!.value, currency: e.revenue!.currencyCode);
+  }
+});
 
-## 4. Sign up at each mediation partner & collect keys
+// Consent
+if (await AdMobMediation.isPrivacyOptionsRequired()) {
+  // Show a "Privacy options" button in settings
+  AdMobMediation.showPrivacyOptionsForm();
+}
 
-For every network you keep, create a publisher account, register your app
-(per platform), and create placements matching your ad formats:
+// Debugging
+AdMobMediation.openAdInspector(); // Google's mediation debug overlay
+```
 
-| Network | What you need from their dashboard |
-|---|---|
-| Unity Ads | Game ID + Placement IDs (cloud.unity.com) |
-| Meta Audience Network | App ID + Placement IDs (business.facebook.com) |
-| AppLovin | SDK key + Zone IDs (dash.applovin.com) |
-| ironSource | App key + Instance IDs (platform.ironsrc.com) |
-| Mintegral | App ID, App Key + Placement/Unit IDs |
-| Pangle | App ID + Ad Placement IDs |
-| Liftoff Monetize (Vungle) | App ID + Placement reference IDs |
-| InMobi | Account ID + Placement IDs |
-| DT Exchange | App ID + Spot IDs |
-| Moloco | App key + Ad unit IDs (adcloud.moloco.com) |
+## AdsConfig reference
 
-Tip: start with 2–4 networks (Meta, Unity, AppLovin, ironSource are the
-usual best earners) — every extra SDK adds app size and startup work. Remove
-a network by deleting its `gma_mediation_*` line from `pubspec.yaml`.
+| Parameter | Default | Description |
+|---|---|---|
+| `appOpen` | none | Ad unit IDs for app open format |
+| `banner` | none | Ad unit IDs for banner format |
+| `interstitial` | none | Ad unit IDs for interstitial format |
+| `rewarded` | none | Ad unit IDs for rewarded format |
+| `rewardedInterstitial` | none | Ad unit IDs for rewarded interstitial format |
+| `native` | none | Ad unit IDs for native format |
+| `useTestAds` | `true` in debug | Force Google test IDs |
+| `testDeviceIds` | `[]` | Hashed device IDs for test ads on real ad units |
+| `childDirected` | `false` | COPPA flag |
+| `maxAdContentRating` | `null` | G / PG / T / MA |
+| `interstitialMinInterval` | 60s | Minimum time between interstitials |
+| `rewardedInterstitialMinInterval` | 60s | Minimum time between rewarded interstitials |
+| `autoShowAppOpenOnResume` | `true` | Auto-show app open on foreground |
+| `debugGeography` | `null` | Test GDPR from anywhere (debug only) |
 
-## 5. Wire the networks into AdMob mediation
+Only configure the formats you use — unconfigured formats stay idle.
 
-For **each ad format** on **each platform**:
+## Mediation consent
 
-1. AdMob → **Mediation → Create mediation group**.
-2. Choose the ad format + platform, target the matching ad unit(s).
-3. Click **Add ad source**:
-   - **Bidding** partners (Meta is bidding-only; most others support it):
-     choose the ad source → sign their partnership agreement inside AdMob →
-     paste the keys from step 4 into the "ad source mapping".
-   - **Waterfall** sources: same mapping, plus a manual **eCPM** value (or
-     enable eCPM optimization where offered).
-4. Repeat per format (banner group, interstitial group, rewarded group, …).
-5. Meta only: in Monetization Manager set the app to **bidding** with AdMob
-   as the mediation platform.
+The UMP consent form handles GDPR automatically. Most modern partner SDKs
+(Meta, Mintegral, Pangle, InMobi, Moloco) read the IAB TCF string written
+by UMP — they need no extra work.
 
-## 6. Test everything
+Networks with **explicit consent APIs** need a registered handler. Call
+`registerConsentHandler` before `initialize`:
 
-1. Add your device's hashed test-device id (printed in logcat/Xcode console
-   on first run) to `AdsService.instance.initialize(testDeviceIds: [...])` in
-   `main.dart`.
-2. Run the app → tap the **Ad Inspector** icon in the app bar. It shows every
-   ad unit, the full mediation waterfall, which adapter filled, and any
-   per-network configuration errors.
-3. On the AdMob **Mediation** page confirm every ad source mapping shows a
-   green check.
-4. GDPR flow: uncomment `debugGeography: DebugGeography.debugGeographyEea`
-   in `main.dart` to force the consent form from anywhere.
-5. Watch the console: every service logs `[Ads]` events including which
-   mediation adapter filled each impression and its revenue.
+```dart
+// Unity
+import 'package:gma_mediation_unity/gma_mediation_unity.dart';
 
-## 7. Before release
+AdMobMediation.registerConsentHandler('Unity', ({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+}) async {
+  final unity = GmaMediationUnity();
+  await unity.setGDPRConsent(hasGdprConsent);
+  await unity.setCCPAConsent(!ccpaOptedOut);
+});
 
-- [ ] Replace all `ca-app-pub-XXXX…` placeholders (6 ad units × 2 platforms
-      + both App IDs).
-- [ ] `app-ads.txt`: AdMob → Apps → View all apps → app-ads.txt tab — publish
-      the snippet at `https://yourdomain.com/app-ads.txt` and **append every
-      mediation partner's app-ads.txt lines** (each partner's docs list them).
-- [ ] Add your store listing URL to the AdMob app settings (needed for
-      app-ads.txt verification) and to each partner dashboard.
-- [ ] Google Play Console → App content → Ads declaration = yes;
-      App Store Connect → App Privacy (tracking = yes, IDFA).
-- [ ] If your app targets children: `childDirected: true` in
-      `AdsService.initialize`, and configure the same in AdMob + partners.
+// AppLovin
+import 'package:gma_mediation_applovin/gma_mediation_applovin.dart';
 
-## Build notes
+AdMobMediation.registerConsentHandler('AppLovin', ({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+}) async {
+  final appLovin = GmaMediationApplovin();
+  await appLovin.setHasUserConsent(hasGdprConsent);
+  await appLovin.setDoNotSell(ccpaOptedOut);
+});
 
-- Android: Mintegral and Pangle resolve from their own Maven repositories —
-  already added in `android/build.gradle.kts`.
-- iOS: `platform :ios, '14.0'` is set in the Podfile (partner SDK minimums).
-  Run `pod install --repo-update` in `ios/` after changing adapters.
-- `gma_mediation_ironsource` is pinned to 2.4.1 and `gma_mediation_inmobi`
-  to 2.1.0: their newer releases require the iOS GMA SDK 13.3, while
-  `google_mobile_ads` 8.0.0 pins 13.2. Unpin them when upgrading
-  `google_mobile_ads` past 8.x.
-- Benign `pod install` warnings: the `EXCLUDED_ARCHS` merge notice
-  (Meta vs ironSource simulator archs — only affects Intel-Mac simulators)
-  and the Profile `base configuration` notice (standard Flutter warning).
-- QA builds with real ad units but forced test ads:
-  `flutter build apk --dart-define=FORCE_TEST_ADS=true`.
+// ironSource
+import 'package:gma_mediation_ironsource/gma_mediation_ironsource.dart';
+
+AdMobMediation.registerConsentHandler('ironSource', ({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+}) async {
+  final ironSource = GmaMediationIronsource();
+  await ironSource.setConsent(hasGdprConsent);
+  await ironSource.setDoNotSell(ccpaOptedOut);
+});
+
+// Liftoff Monetize (Vungle)
+import 'package:gma_mediation_liftoffmonetize/gma_mediation_liftoffmonetize.dart';
+
+AdMobMediation.registerConsentHandler('Liftoff', ({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+}) async {
+  final liftoff = GmaMediationLiftoffmonetize();
+  await liftoff.setGDPRStatus(hasGdprConsent, null);
+  await liftoff.setCCPAStatus(!ccpaOptedOut);
+});
+
+// DT Exchange
+import 'package:gma_mediation_dtexchange/gma_mediation_dtexchange.dart';
+
+AdMobMediation.registerConsentHandler('DT Exchange', ({
+  required bool hasGdprConsent,
+  required bool ccpaOptedOut,
+}) async {
+  final dt = GmaMediationDTExchange();
+  await dt.setUSPrivacyString(ccpaOptedOut ? '1YYN' : '1YNN');
+  await dt.setLgpdConsent(hasGdprConsent);
+});
+```
+
+## Removing a network
+
+Delete its `gma_mediation_*` line from your `pubspec.yaml` and remove its
+consent handler registration (if any). Run `flutter pub get` and
+`pod install --repo-update` in `ios/`. That's it — the core package has no
+hard dependency on any mediation adapter.
+
+## Before release checklist
+
+- [ ] Replace all `ca-app-pub-xxx` placeholders with real ad unit IDs.
+- [ ] Set your AdMob App ID in `AndroidManifest.xml` and `Info.plist`.
+- [ ] Publish `app-ads.txt` at your domain with AdMob's snippet + each
+      partner's lines.
+- [ ] Google Play: App content → Ads declaration = yes.
+- [ ] App Store Connect: App Privacy → tracking declaration.
+- [ ] If targeting children: set `childDirected: true` in `AdsConfig`.
+- [ ] QA with forced test ads: `flutter build apk --dart-define=FORCE_TEST_ADS=true`.

@@ -41,14 +41,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
-  cupertino_icons:
-    dependency: "direct main"
-    description:
-      name: cupertino_icons
-      sha256: "41e005c33bd814be4d3096aff55b1908d419fde52ca656c8c47719ec745873cd"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.0.9"
   fake_async:
     dependency: transitive
     description:
@@ -96,86 +88,6 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
-  gma_mediation_applovin:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_applovin
-      sha256: d3606209caddf2461dc008291ced7353b31a3ef93dcc5f6dcf1ace6b8c34c3b4
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.6.1"
-  gma_mediation_dtexchange:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_dtexchange
-      sha256: "88e2bcb8c45b8b27de95b4c72c06aece704afd862f8c7b8694db2f59b184d7e8"
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.3.4"
-  gma_mediation_inmobi:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_inmobi
-      sha256: "1393431fa5f90dfe3d62a0597f3e67e22825fa63ac4071d87b16fc9f87d6e2f3"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
-  gma_mediation_ironsource:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_ironsource
-      sha256: d4b5ce0a302cf4dfe4c49cbd25678d676e12f05512941533ac69af85ae7b8782
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.1"
-  gma_mediation_liftoffmonetize:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_liftoffmonetize
-      sha256: c3ed8a92a717f477cf5909a7f4ce0c96dc7ff86427d84ef6716ab590035345c9
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.5.0"
-  gma_mediation_meta:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_meta
-      sha256: d65dd79c51f6161aaac8c9b07f9a921f73a560d275a15106f440be2016c766bc
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.5.2"
-  gma_mediation_mintegral:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_mintegral
-      sha256: b1488b4e5979ba4705717e736708966eeb886a4bbfc1db2e563d8d37828896d5
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.1.0"
-  gma_mediation_moloco:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_moloco
-      sha256: "48da090933c160b2b1f450bd4a33caaab569b182a838de01008150f971c7f21c"
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.4.0"
-  gma_mediation_pangle:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_pangle
-      sha256: ea8112f5419c1606bc13d7fcdc75a716cf0bf27cb7d368c385543c0c5d41f9d6
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.6.0"
-  gma_mediation_unity:
-    dependency: "direct main"
-    description:
-      name: gma_mediation_unity
-      sha256: f2326489fa598d4ff0744509df303664f87a6f5f46ab8dfbed81b4c823100df2
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.8.0"
   google_mobile_ads:
     dependency: "direct main"
     description:
@@ -462,5 +374,5 @@ packages:
     source: hosted
     version: "1.1.0"
 sdks:
-  dart: ">=3.11.5 <4.0.0"
+  dart: ">=3.10.0 <4.0.0"
   flutter: ">=3.38.1"

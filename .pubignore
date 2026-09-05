@@ -1,0 +1,6 @@
+android/
+ios/
+*.iml
+pubspec.lock
+.dart_tool/
+.claude/

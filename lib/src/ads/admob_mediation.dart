@@ -6,6 +6,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ads_config.dart';
 import 'ads_service.dart';
 import 'consent/consent_service.dart';
+import 'consent/mediation_consent_bridge.dart';
 import 'core/ad_events.dart';
 import 'services/app_open_ad_service.dart';
 import 'services/interstitial_ad_service.dart';
@@ -40,14 +41,12 @@ abstract final class AdMobMediation {
   /// request configuration → Mobile Ads SDK + all mediation adapters.
   ///
   /// Safe to call multiple times (subsequent calls await the first run).
-  /// Full-screen services subscribe immediately and pre-load their first ad
-  /// the moment the SDK is ready.
+  /// Interstitial and app-open services warm up when the SDK is ready.
+  /// Rewarded formats are loaded only when explicitly requested.
   static Future<void> initialize({AdsConfig config = const AdsConfig()}) {
     final future = AdsService.instance.initialize(config: config);
-    // Touch the singletons so they subscribe to the ready signal.
+    // Only always-on formats subscribe to the ready signal at startup.
     InterstitialAdService.instance;
-    RewardedAdService.instance;
-    RewardedInterstitialAdService.instance;
     AppOpenAdService.instance.listenToAppForeground();
     return future;
   }
@@ -95,7 +94,17 @@ abstract final class AdMobMediation {
     onDismissed: onDismissed,
   );
 
-  static Future<void> loadRewarded() => RewardedAdService.instance.load();
+  static Future<void> loadRewarded() {
+    final service = RewardedAdService.instance;
+    service.startPreloading();
+    return service.load();
+  }
+
+  static void acquireRewardedPreload() =>
+      RewardedAdService.instance.acquirePreload();
+
+  static void releaseRewardedPreload() =>
+      RewardedAdService.instance.releasePreload();
 
   static ValueListenable<bool> get isRewardedReady =>
       RewardedAdService.instance.isAdReady;
@@ -112,8 +121,11 @@ abstract final class AdMobMediation {
     onDismissed: onDismissed,
   );
 
-  static Future<void> loadRewardedInterstitial() =>
-      RewardedInterstitialAdService.instance.load();
+  static Future<void> loadRewardedInterstitial() {
+    final service = RewardedInterstitialAdService.instance;
+    service.startPreloading();
+    return service.load();
+  }
 
   static ValueListenable<bool> get isRewardedInterstitialReady =>
       RewardedInterstitialAdService.instance.isAdReady;
@@ -145,6 +157,21 @@ abstract final class AdMobMediation {
       AppOpenAdService.instance.autoShowEnabled;
   static set appOpenAutoShowEnabled(bool enabled) =>
       AppOpenAdService.instance.autoShowEnabled = enabled;
+
+  // ------------------------------------------------------------------
+  // Mediation consent
+  // ------------------------------------------------------------------
+
+  /// Register a consent handler for a mediation network that needs explicit
+  /// consent forwarding. Call before [initialize].
+  ///
+  /// Networks that read the IAB TCF string automatically (Meta, Mintegral,
+  /// Pangle, InMobi, Moloco) need no handler. See [MediationConsentBridge]
+  /// for which networks need one and how to write the handler.
+  static void registerConsentHandler(
+    String networkName,
+    ConsentHandler handler,
+  ) => MediationConsentBridge.register(networkName, handler);
 
   // ------------------------------------------------------------------
   // Consent / privacy

@@ -14,7 +14,7 @@ import '../core/full_screen_ad_service.dart';
 class RewardedInterstitialAdService
     extends FullScreenAdService<RewardedInterstitialAd> {
   RewardedInterstitialAdService._()
-    : super(format: AdFormat.rewardedInterstitial);
+    : super(format: AdFormat.rewardedInterstitial, autoPreload: false);
 
   static final RewardedInterstitialAdService instance =
       RewardedInterstitialAdService._();
