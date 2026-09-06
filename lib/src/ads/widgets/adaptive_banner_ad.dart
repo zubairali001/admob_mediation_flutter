@@ -40,6 +40,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
   int _loadGeneration = 0;
+  final Set<Ad> _disposedAds = {};  // prevent double-dispose on race
 
   @override
   void initState() {
@@ -103,6 +104,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
       listener: BannerAdListener(
         onAdLoaded: (ad) {
           if (!_isCurrentAd(ad, generation)) {
+            if (_disposedAds.remove(ad)) return;  // already disposed
             unawaited(ad.dispose());
             return;
           }
@@ -118,7 +120,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
           });
         },
         onAdFailedToLoad: (ad, error) {
-          unawaited(ad.dispose());
+          if (!_disposedAds.remove(ad)) unawaited(ad.dispose());
           if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
           _bannerAd = null;
@@ -167,7 +169,10 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     _adSize = null;
     _isLoaded = false;
     _isLoading = false;
-    if (ad != null) unawaited(ad.dispose());
+    if (ad != null) {
+      _disposedAds.add(ad);
+      unawaited(ad.dispose());
+    }
   }
 
   void _onAvailabilityChanged() {

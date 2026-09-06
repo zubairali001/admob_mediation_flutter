@@ -40,6 +40,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
   int _loadGeneration = 0;
+  final Set<Ad> _disposedAds = {};  // prevent double-dispose on race
 
   double get _height => widget.template == TemplateType.small ? 120 : 350;
 
@@ -106,6 +107,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!_isCurrentAd(ad, generation)) {
+            if (_disposedAds.remove(ad)) return;  // already disposed
             unawaited(ad.dispose());
             return;
           }
@@ -121,7 +123,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
           });
         },
         onAdFailedToLoad: (ad, error) {
-          unawaited(ad.dispose());
+          if (!_disposedAds.remove(ad)) unawaited(ad.dispose());
           if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
           _nativeAd = null;
@@ -169,7 +171,10 @@ class _NativeAdCardState extends State<NativeAdCard> {
     _nativeAd = null;
     _isLoaded = false;
     _isLoading = false;
-    if (ad != null) unawaited(ad.dispose());
+    if (ad != null) {
+      _disposedAds.add(ad);
+      unawaited(ad.dispose());
+    }
   }
 
   void _handleLoadFailure(Object error, int generation) {
@@ -177,7 +182,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
     final ad = _nativeAd;
     _nativeAd = null;
     _isLoading = false;
-    if (ad != null) unawaited(ad.dispose());
+    if (ad != null && !_disposedAds.remove(ad)) unawaited(ad.dispose());
     _emit(AdEventType.failedToLoad, error: error);
     if (mounted) setState(() => _loadFailed = true);
     _scheduleRetry();
