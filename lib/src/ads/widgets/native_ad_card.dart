@@ -40,7 +40,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
   int _loadGeneration = 0;
-  final Set<Ad> _disposedAds = {};  // prevent double-dispose on race
+  final Set<Ad> _disposedAds = {}; // prevent double-dispose on race
 
   double get _height => widget.template == TemplateType.small ? 120 : 350;
 
@@ -107,7 +107,7 @@ class _NativeAdCardState extends State<NativeAdCard> {
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!_isCurrentAd(ad, generation)) {
-            if (_disposedAds.remove(ad)) return;  // already disposed
+            if (_disposedAds.remove(ad)) return; // already disposed
             unawaited(ad.dispose());
             return;
           }

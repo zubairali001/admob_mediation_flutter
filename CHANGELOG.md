@@ -1,3 +1,13 @@
+## 0.1.1
+
+- Fix expiry timer not cancelled when `show()` takes the cached ad, preventing
+  a redundant load after the timer fires.
+- Fix double-dispose in `AdaptiveBannerAd` and `NativeAdCard` when the widget
+  is removed while a load is in-flight.
+- Rewrite README: remove stale adapter version table, add AdMob dashboard
+  consent setup guide (GDPR and US-state), add initialization flow overview,
+  and expand event and test-device documentation.
+
 ## 0.1.0
 
 - Add app open, adaptive banner, interstitial, native, rewarded, and rewarded

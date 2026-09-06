@@ -2,7 +2,7 @@ name: admob_mediation_flutter
 description: >-
   An unofficial Flutter service layer for AdMob mediation with UMP consent,
   preloading, retry backoff, frequency caps, ad widgets, and revenue events.
-version: 0.1.0
+version: 0.1.1
 
 homepage: https://github.com/zubairali001/admob_mediation_flutter
 repository: https://github.com/zubairali001/admob_mediation_flutter
