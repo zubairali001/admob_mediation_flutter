@@ -147,7 +147,10 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
 
     final ad = _ad!;
     _ad = null;
+    _loadedAt = null;
     isAdReady.value = false;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
     _pendingOnDismissed = onDismissed;
     _pendingOnFinished = onFinished;
     onWillShow?.call();
