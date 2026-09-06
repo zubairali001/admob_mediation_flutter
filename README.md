@@ -16,7 +16,6 @@ This package is not affiliated with or endorsed by Google.
 - Runtime master switch for subscriptions and remove-ads entitlements
 - Impression-level revenue and lifecycle events from one stream
 - Google test IDs for configured formats in debug builds
-- Optional partner adapters installed directly by the host app
 
 ## Requirements
 
@@ -32,25 +31,12 @@ dependencies:
   admob_mediation_flutter: ^0.1.0
 ```
 
-The host app must add each mediation adapter it uses. Compatible adapter
-versions for `google_mobile_ads: ^9.1.0` at this release are:
-
-| Network | Package |
-|---|---|
-| Unity Ads | `gma_mediation_unity: ^1.10.0` |
-| Meta Audience Network | `gma_mediation_meta: ^1.7.0` |
-| AppLovin | `gma_mediation_applovin: ^2.6.3` |
-| Mintegral | `gma_mediation_mintegral: ^2.1.3` |
-| Pangle | `gma_mediation_pangle: ^4.1.1` |
-| ironSource | `gma_mediation_ironsource: ^2.5.1` |
-| Liftoff Monetize | `gma_mediation_liftoffmonetize: ^1.5.3` |
-| InMobi | `gma_mediation_inmobi: ^2.3.1` |
-| DT Exchange | `gma_mediation_dtexchange: ^1.3.6` |
-| Moloco | `gma_mediation_moloco: ^3.6.1` |
-
-Adapter versions change independently. Confirm the latest compatible version
-and complete the network-specific Android, iOS, and privacy steps on the
+This package works with AdMob on its own. If you use mediation partners
+(Unity, Meta, AppLovin, etc.), add their adapter packages to your app
+following the
 [Google mediation integrations page](https://developers.google.com/admob/flutter/mediation).
+The adapters are separate packages maintained by Google — this package does
+not bundle or version-lock any of them.
 
 ## Platform setup
 
@@ -77,14 +63,27 @@ Add the iOS App ID to `ios/Runner/Info.plist`:
 Also copy the current `SKAdNetworkItems` list from Google's
 [iOS Mobile Ads setup guide](https://developers.google.com/admob/ios/quick-start#update_your_infoplist).
 
-Set the deployment targets required by the selected
-[`google_mobile_ads`](https://pub.dev/packages/google_mobile_ads) and adapter
-versions. Add any Maven repositories, SKAdNetwork identifiers, attribution
-endpoints, or manifest entries required by each adapter's current guide.
+Set the deployment targets required by
+[`google_mobile_ads`](https://pub.dev/packages/google_mobile_ads). If you use
+mediation adapters, add any Maven repositories, SKAdNetwork identifiers, or
+manifest entries their guides require.
 
 If iOS fails with a `GoogleMobileAds_Beta.h` non-modular-header error, remove
-`use_frameworks!` from the Podfile and reinstall pods. The included example
-uses the static-library CocoaPods integration verified with version 9.1.0.
+`use_frameworks!` from the Podfile and reinstall pods.
+
+## How it works
+
+When you call `initialize`, the package runs this sequence automatically:
+
+1. **UMP consent** — requests consent info, shows the form if required (GDPR/US-state).
+2. **Partner consent sync** — forwards choices to registered mediation handlers (if any).
+3. **Request configuration** — applies test devices, content rating, and age treatment.
+4. **Mobile Ads SDK init** — boots the SDK (and any adapters the host app installed).
+5. **Preload** — each configured full-screen format loads one ad in the background.
+
+If consent is denied at step 1, the flow stops and ads stay disabled. No ad
+request ever fires before consent is resolved. The whole sequence is
+idempotent — calling `initialize` multiple times is safe.
 
 ## Initialize
 
@@ -128,9 +127,18 @@ Future<void> main() async {
 }
 ```
 
-Debug builds use Google's test ad unit IDs for each configured format by
-default. For a release-mode QA build, use
+Debug builds use Google's test ad unit IDs automatically — you never need to
+look up test IDs yourself. For a release-mode QA build, use
 `--dart-define=FORCE_TEST_ADS=true`. Never click live ads during development.
+
+To see test ads on a physical device against production ad units, add the
+device's hashed ID (printed in the debug console on first ad request):
+
+```dart
+AdsConfig(
+  testDeviceIds: ['YOUR-HASHED-DEVICE-ID'],
+)
+```
 
 ## Show ads
 
@@ -186,20 +194,80 @@ small for video creative requirements.
 
 ## Consent and privacy
 
-Configure GDPR and US-state messages under **Privacy & messaging** in AdMob.
-The package updates UMP first, shows a required form, checks whether ads may be
-requested, and only then initializes Mobile Ads.
+The package handles GDPR and US-state privacy automatically through Google's
+User Messaging Platform (UMP). It runs consent **before** any ad request — if
+consent is denied, ads stay disabled for the session and the app continues
+normally.
+
+### 1. Create consent messages in AdMob
+
+You must create the messages in the AdMob dashboard first, otherwise UMP has
+nothing to show:
+
+**GDPR (required for EEA/UK users):**
+
+1. Open [AdMob](https://apps.admob.com) → **Privacy & messaging** → **GDPR**.
+2. Click **Create message**.
+3. Select the apps this message applies to.
+4. Choose the consent options — "Consent or manage options" is recommended so
+   users can accept, reject, or manage individual purposes.
+5. Customize the message text and styling to match your app.
+6. **Publish** the message. It will not appear to users until published.
+
+**US state privacy (CCPA/CPRA — required for US users in applicable states):**
+
+1. In **Privacy & messaging** → **US states**.
+2. Click **Create message**.
+3. Select the apps and customize the opt-out message.
+4. **Publish** the message.
+
+Without published messages, UMP will not show any consent form and will
+fall back to the cached consent status from a previous session (or allow ads
+if no prior status exists and the user is outside a regulated region).
+
+### 2. Test consent from anywhere
+
+Use `debugGeography` to simulate EEA or US regions during development. This
+only works in debug builds:
+
+```dart
+AdsConfig(
+  debugGeography: DebugGeography.debugGeographyEea, // Test GDPR form
+  testDeviceIds: ['YOUR-HASHED-ID'], // Required for debug geography
+)
+```
+
+To find your test device ID, run the app once — the Mobile Ads SDK prints a
+line like `Use RequestConfiguration.Builder().setTestDeviceIds(Arrays.asList("ABCDEF123456"))`
+in the debug console.
+
+### 3. Add a privacy settings entry point
+
+When UMP reports that a privacy options button is required (EEA/UK users),
+your settings screen must offer one:
 
 ```dart
 if (await AdMobMediation.isPrivacyOptionsRequired()) {
+  // Show a "Privacy settings" or "Ad preferences" button that calls:
   await AdMobMediation.showPrivacyOptionsForm();
 }
 ```
 
-Do not infer GDPR or US-state choices from unrelated local preferences. If an
-installed adapter requires an explicit privacy API, supply the current values
-from your consent-management implementation and register its handler before
-initialization:
+This reopens the consent form so users can change their choices. The package
+automatically re-checks consent and updates ad loading status afterward.
+
+### 4. What happens when consent is denied
+
+- `AdMobMediation.status` becomes `AdsStatus.disabled`.
+- No ads load or show — the app keeps running normally.
+- Call `AdMobMediation.reinitialize()` if the user grants consent later
+  (e.g. through the privacy options form).
+
+### Mediation partner consent (optional)
+
+Only needed when an installed mediation adapter requires an explicit privacy
+API call. Most adapters read consent strings automatically — check the
+adapter's integration guide before adding a handler.
 
 ```dart
 AdMobMediation.registerConsentHandler(
@@ -225,6 +293,8 @@ await AdMobMediation.initialize(
 The identifiers above are placeholders for your own consent store and the
 adapter's documented privacy API. If a handler fails, initialization fails
 closed and `AdMobMediation.status` becomes `AdsStatus.disabled`.
+
+### Child-directed apps
 
 For child-directed or under-age treatment, provide values based on your app's
 audience and legal review:
@@ -258,16 +328,35 @@ AdMobMediation.setAdsEnabled(!isPremium);
 
 ## Events and diagnostics
 
+All ad formats emit events through a single stream. Subscribe once, early:
+
 ```dart
-final subscription = AdMobMediation.events.listen((event) {
-  if (event.type == AdEventType.paid && event.revenue != null) {
-    analytics.logAdRevenue(
-      value: event.revenue!.value,
-      currency: event.revenue!.currencyCode,
-    );
+AdMobMediation.events.listen((event) {
+  switch (event.type) {
+    case AdEventType.paid:
+      // Impression-level ad revenue — send to your analytics
+      analytics.logAdRevenue(
+        value: event.revenue!.value,
+        currency: event.revenue!.currencyCode,
+        adFormat: event.format.name,
+        network: event.mediationAdapter,
+      );
+    case AdEventType.impression:
+      analytics.logAdImpression(format: event.format.name);
+    case AdEventType.failedToLoad:
+      debugPrint('Ad failed: ${event.format.name} — ${event.error}');
+    default:
+      break;
   }
 });
+```
 
+Available event types: `requested`, `loaded`, `failedToLoad`, `shown`,
+`failedToShow`, `impression`, `clicked`, `dismissed`, `rewardEarned`, `paid`.
+
+Use Google's Ad Inspector to verify your ad sources on a real device:
+
+```dart
 AdMobMediation.openAdInspector();
 ```
 
@@ -295,13 +384,11 @@ AdMobMediation.openAdInspector();
 
 - Replace every placeholder App ID and ad unit ID.
 - Keep test ads enabled throughout development and QA.
-- Create and verify every mediation ad source in the AdMob dashboard.
-- Complete each partner's account, bidding/waterfall, and privacy setup.
-- Publish `app-ads.txt` with Google and partner entries.
+- Publish `app-ads.txt` with Google's entry (and partner entries if using mediation).
 - Add the required privacy-options entry point when UMP reports it is required.
 - Declare ads and data use in Google Play and App Store Connect.
 - Validate consent, every format, rewards, paid events, and remove-ads on devices.
-- Use Ad Inspector to confirm every expected adapter initializes.
+- Use Ad Inspector to confirm expected ad sources initialize.
 - Implement server-side verification for rewards when fraud resistance matters.
 
 See the runnable [example](example/lib/main.dart) and the maintainer
