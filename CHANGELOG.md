@@ -1,3 +1,11 @@
+## 0.1.2
+
+- Fix `NativeAdCard` losing its loaded (or in-flight) ad whenever it scrolled
+  out of a lazy list's cache extent — the widget's state was destroyed and
+  rebuilt from scratch on every return, so a native ad placed inside a feed
+  or grid rarely survived long enough to actually be seen. It now keeps
+  itself alive like any other stateful list item.
+
 ## 0.1.1
 
 - Fix expiry timer not cancelled when `show()` takes the cached ad, preventing

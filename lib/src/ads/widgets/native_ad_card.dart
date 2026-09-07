@@ -32,7 +32,8 @@ class NativeAdCard extends StatefulWidget {
   State<NativeAdCard> createState() => _NativeAdCardState();
 }
 
-class _NativeAdCardState extends State<NativeAdCard> {
+class _NativeAdCardState extends State<NativeAdCard>
+    with AutomaticKeepAliveClientMixin {
   NativeAd? _nativeAd;
   bool _isLoaded = false;
   bool _loadFailed = false;
@@ -240,8 +241,19 @@ class _NativeAdCardState extends State<NativeAdCard> {
     );
   }
 
+  // Home's girl grid is an unbounded, index-cycling list: any card scrolled
+  // past the sliver's cache extent is destroyed outright, not just hidden.
+  // Without keep-alive, every scroll-away-and-back threw the in-flight or
+  // already-loaded ad out and started a brand new load from zero — so a
+  // native ad that takes any real time to load almost never survived long
+  // enough for a user to actually see it, which is why the slot only ever
+  // showed the "Ad" placeholder.
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
     if (_loadFailed) return const SizedBox.shrink();
 
     return ConstrainedBox(
