@@ -14,6 +14,9 @@ class RewardedInterstitialAdService
   RewardedInterstitialAdService._()
     : super(format: AdFormat.rewardedInterstitial);
 
+  RewardedInterstitialAdService.forPlacement(String placement)
+    : super(format: AdFormat.rewardedInterstitial, placement: placement);
+
   static final RewardedInterstitialAdService instance =
       RewardedInterstitialAdService._();
 
@@ -35,13 +38,13 @@ class RewardedInterstitialAdService
   }
 
   @override
-  Future<void> loadPlatformAd() {
+  Future<void> loadPlatformAd(int generation) {
     return RewardedInterstitialAd.load(
       adUnitId: adUnitId!,
       request: AdsService.instance.config.requestFor(format),
       rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
-        onAdLoaded: onAdLoaded,
-        onAdFailedToLoad: onAdFailedToLoad,
+        onAdLoaded: (ad) => onAdLoaded(ad, generation),
+        onAdFailedToLoad: (error) => onAdFailedToLoad(error, generation),
       ),
     );
   }

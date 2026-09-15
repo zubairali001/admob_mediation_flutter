@@ -61,7 +61,7 @@ class AdsService {
 
   /// Idempotent: concurrent/repeated calls await the same future.
   Future<void> initialize({AdsConfig config = const AdsConfig()}) {
-    if (_initialization == null) _config = config;
+    if (_initialization == null) _config = config.snapshot();
     return _initialization ??= _initialize();
   }
 

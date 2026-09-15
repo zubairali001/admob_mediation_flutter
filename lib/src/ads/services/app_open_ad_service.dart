@@ -20,6 +20,13 @@ class AppOpenAdService extends FullScreenAdService<AppOpenAd> {
         ttl: const Duration(hours: 4),
       );
 
+  AppOpenAdService.forPlacement(String placement)
+    : super(
+        format: AdFormat.appOpen,
+        placement: placement,
+        ttl: const Duration(hours: 4),
+      );
+
   static final AppOpenAdService instance = AppOpenAdService._();
 
   /// Escape hatch for flows that intentionally leave the app.
@@ -61,13 +68,13 @@ class AppOpenAdService extends FullScreenAdService<AppOpenAd> {
   }
 
   @override
-  Future<void> loadPlatformAd() {
+  Future<void> loadPlatformAd(int generation) {
     return AppOpenAd.load(
       adUnitId: adUnitId!,
       request: AdsService.instance.config.requestFor(format),
       adLoadCallback: AppOpenAdLoadCallback(
-        onAdLoaded: onAdLoaded,
-        onAdFailedToLoad: onAdFailedToLoad,
+        onAdLoaded: (ad) => onAdLoaded(ad, generation),
+        onAdFailedToLoad: (error) => onAdFailedToLoad(error, generation),
       ),
     );
   }

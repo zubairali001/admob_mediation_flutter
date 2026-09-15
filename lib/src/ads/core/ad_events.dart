@@ -53,6 +53,8 @@ class AdEvent {
   const AdEvent({
     required this.format,
     required this.type,
+    this.placement,
+    this.adUnitId,
     this.error,
     this.reward,
     this.revenue,
@@ -61,6 +63,12 @@ class AdEvent {
 
   final AdFormat format;
   final AdEventType type;
+
+  /// App placement name; null for the default or a direct widget ID.
+  final String? placement;
+
+  /// Actual requested unit ID, including test-ID substitution.
+  final String? adUnitId;
   final Object? error;
   final RewardItem? reward;
   final AdRevenue? revenue;
@@ -72,6 +80,8 @@ class AdEvent {
   @override
   String toString() =>
       'AdEvent(${format.name}.${type.name}'
+      '${placement != null ? ', placement: $placement' : ''}'
+      '${adUnitId != null ? ', adUnitId: $adUnitId' : ''}'
       '${mediationAdapter != null ? ', adapter: $mediationAdapter' : ''}'
       '${reward != null ? ', reward: ${reward!.amount} ${reward!.type}' : ''}'
       '${revenue != null ? ', revenue: $revenue' : ''}'

@@ -10,7 +10,8 @@ This package is not affiliated with or endorsed by Google.
 
 - App open, banner, interstitial, native, rewarded, and rewarded interstitial ads
 - Consent before Mobile Ads initialization and the first ad request
-- One cached full-screen ad per configured format with TTL expiry
+- Named placements with separate Android/iOS IDs for every ad format
+- One cached full-screen ad per active placement with TTL expiry
 - Exponential retry backoff after load failures
 - Per-format frequency caps and a global full-screen lock
 - Runtime master switch for subscriptions and remove-ads entitlements
@@ -28,7 +29,7 @@ This package is not affiliated with or endorsed by Google.
 
 ```yaml
 dependencies:
-  admob_mediation_flutter: ^0.1.0
+  admob_mediation_flutter: ^0.2.0
 ```
 
 This package works with AdMob on its own. If you use mediation partners
@@ -79,7 +80,7 @@ When you call `initialize`, the package runs this sequence automatically:
 2. **Partner consent sync** — forwards choices to registered mediation handlers (if any).
 3. **Request configuration** — applies test devices, content rating, and age treatment.
 4. **Mobile Ads SDK init** — boots the SDK (and any adapters the host app installed).
-5. **Preload** — each configured full-screen format loads one ad in the background.
+5. **Preload** — each configured default full-screen unit loads one ad in the background. Named placements start on first access.
 
 If consent is denied at step 1, the flow stops and ads stay disabled. No ad
 request ever fires before consent is resolved. The whole sequence is
@@ -140,9 +141,91 @@ AdsConfig(
 )
 ```
 
+## Multiple IDs for the same ad format
+
+Register named placements once. You can add ten banner IDs (or more) by adding
+entries to `bannerPlacements`; each widget requests only its selected entry.
+These are app-defined names, not AdMob placement identifiers.
+
+```dart
+await AdMobMediation.initialize(
+  config: const AdsConfig(
+    bannerPlacements: {
+      'home_bottom': AdUnitId(
+        android: 'ca-app-pub-YOUR_ACCOUNT/HOME_ANDROID',
+        ios: 'ca-app-pub-YOUR_ACCOUNT/HOME_IOS',
+      ),
+      'profile_bottom': AdUnitId(
+        android: 'ca-app-pub-YOUR_ACCOUNT/PROFILE_ANDROID',
+        ios: 'ca-app-pub-YOUR_ACCOUNT/PROFILE_IOS',
+      ),
+      // Add your other eight placements here.
+    },
+    nativePlacements: {
+      'feed': AdUnitId(android: 'ca-app-pub-YOUR_ACCOUNT/FEED_ANDROID'),
+    },
+    interstitialPlacements: {
+      'level_complete': AdUnitId(
+        android: 'ca-app-pub-YOUR_ACCOUNT/LEVEL_ANDROID',
+        ios: 'ca-app-pub-YOUR_ACCOUNT/LEVEL_IOS',
+      ),
+    },
+  ),
+);
+
+// Use a different widget on each screen.
+const AdaptiveBannerAd(placement: 'home_bottom');
+const AdaptiveBannerAd(placement: 'profile_bottom');
+const NativeAdCard(placement: 'feed');
+
+// Preload before the transition; load() does not wait for an ad to be ready.
+await AdMobMediation.loadInterstitial(placement: 'level_complete');
+final readiness = AdMobMediation.isAdReady(
+  AdFormat.interstitial,
+  placement: 'level_complete',
+);
+
+// At the transition, use the same placement. Continue if no ad can show.
+final shown = await AdMobMediation.showInterstitial(
+  placement: 'level_complete',
+  onDismissed: goNext,
+);
+if (!shown) goNext();
+
+// Stop keeping this placement warm when it is no longer needed.
+await AdMobMediation.stopPreloading(
+  AdFormat.interstitial,
+  placement: 'level_complete',
+);
+```
+
+Also available: `rewardedPlacements`, `rewardedInterstitialPlacements`, and
+`appOpenPlacements`. Their matching `load...` and `show...` methods accept
+`placement` in the same way. Rewarded show methods still require `onReward`.
+Named app-open placements are shown manually; automatic foreground ads use
+only the default `appOpen` ID.
+
+- Existing `banner`, `interstitial`, etc. remain the default IDs when placement
+  is omitted. Existing readiness getters still refer to those default units.
+- Names are scoped per format. Unknown/blank names throw `ArgumentError`;
+  missing platform IDs disable that placement without falling back to another ID.
+- Initialization snapshots the maps. Call `initialize` once with all placements;
+  repeating it does not replace the configuration.
+- Named full-screen placements start preloading on first load, show, or readiness
+  lookup. Each keeps its own ad, expiry, and retries. `stopPreloading` releases
+  the cached ad and stops retries; another lookup/load/show restarts preloading.
+- Interstitial and rewarded-interstitial cooldowns apply across their placements.
+  The shared full-screen lock prevents two placements/formats showing together.
+- `AdaptiveBannerAd(adUnitId: ...)` and `NativeAdCard(adUnitId: ...)` still work.
+  Choose either `placement` or `adUnitId`, not both. All IDs, including direct
+  overrides, now respect `useTestAds`; production IDs are substituted in debug
+  mode by default. Pass `useTestAds: false` only when you intend to use real IDs.
+- Events include `placement` (null for default/direct IDs) and `adUnitId`
+  (the actual requested ID after test-mode substitution).
+
 ## Show ads
 
-Configured full-screen ads preload automatically. A show call returns `false`
+Configured default full-screen ads preload automatically. A show call returns `false`
 when an ad is not ready, ads are disabled, the frequency cap is active, or
 another full-screen ad is visible. The app should continue its normal flow in
 that case.

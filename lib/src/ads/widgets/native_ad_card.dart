@@ -19,13 +19,21 @@ import '../core/retry_policy.dart';
 class NativeAdCard extends StatefulWidget {
   const NativeAdCard({
     super.key,
+    this.placement,
     this.adUnitId,
     this.template = TemplateType.medium,
-  });
+  }) : assert(
+         placement == null || adUnitId == null,
+         'Specify either placement or adUnitId, not both.',
+       );
 
   /// Overrides the native ad unit id from the app's `AdsConfig` for this
   /// instance (e.g. an image-only unit for the small template).
   final String? adUnitId;
+
+  /// Key in the matching AdsConfig placement map. Omit to use the default ID.
+  /// Cannot be combined with [adUnitId]. Both paths respect test-ad mode.
+  final String? placement;
   final TemplateType template;
 
   @override
@@ -41,7 +49,7 @@ class _NativeAdCardState extends State<NativeAdCard>
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
   int _loadGeneration = 0;
-  final Set<Ad> _disposedAds = {}; // prevent double-dispose on race
+  final Expando<bool> _disposedAds = Expando<bool>();
 
   double get _height => widget.template == TemplateType.small ? 120 : 350;
 
@@ -63,9 +71,11 @@ class _NativeAdCardState extends State<NativeAdCard>
   void _maybeLoad() {
     if (!mounted || !AdsService.instance.canServeAds) return;
     if (_nativeAd != null || _isLoading) return;
-    final adUnitId =
-        widget.adUnitId ??
-        AdsService.instance.config.adUnitIdFor(AdFormat.native);
+    final adUnitId = AdsService.instance.config.adUnitIdFor(
+      AdFormat.native,
+      placement: widget.placement,
+      adUnitId: widget.adUnitId,
+    );
     if (adUnitId == null) return;
 
     _isLoading = true;
@@ -108,8 +118,7 @@ class _NativeAdCardState extends State<NativeAdCard>
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!_isCurrentAd(ad, generation)) {
-            if (_disposedAds.remove(ad)) return; // already disposed
-            unawaited(ad.dispose());
+            _disposeOnce(ad);
             return;
           }
           _emit(
@@ -124,7 +133,7 @@ class _NativeAdCardState extends State<NativeAdCard>
           });
         },
         onAdFailedToLoad: (ad, error) {
-          if (!_disposedAds.remove(ad)) unawaited(ad.dispose());
+          _disposeOnce(ad);
           if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
           _nativeAd = null;
@@ -135,17 +144,24 @@ class _NativeAdCardState extends State<NativeAdCard>
           });
           _scheduleRetry();
         },
-        onAdImpression: (ad) => _emit(AdEventType.impression),
-        onAdClicked: (ad) => _emit(AdEventType.clicked),
-        onPaidEvent: (ad, valueMicros, precision, currencyCode) => _emit(
-          AdEventType.paid,
-          adapter: ad.responseInfo?.mediationAdapterClassName,
-          revenue: AdRevenue(
-            valueMicros: valueMicros,
-            currencyCode: currencyCode,
-            precision: precision,
-          ),
-        ),
+        onAdImpression: (ad) {
+          if (_isCurrentAd(ad, generation)) _emit(AdEventType.impression);
+        },
+        onAdClicked: (ad) {
+          if (_isCurrentAd(ad, generation)) _emit(AdEventType.clicked);
+        },
+        onPaidEvent: (ad, valueMicros, precision, currencyCode) {
+          if (!_isCurrentAd(ad, generation)) return;
+          _emit(
+            AdEventType.paid,
+            adapter: ad.responseInfo?.mediationAdapterClassName,
+            revenue: AdRevenue(
+              valueMicros: valueMicros,
+              currencyCode: currencyCode,
+              precision: precision,
+            ),
+          );
+        },
       ),
     );
     unawaited(
@@ -164,6 +180,12 @@ class _NativeAdCardState extends State<NativeAdCard>
     _maybeLoad();
   }
 
+  void _disposeOnce(Ad ad) {
+    if (_disposedAds[ad] == true) return;
+    _disposedAds[ad] = true;
+    unawaited(ad.dispose());
+  }
+
   void _disposeAd() {
     _loadGeneration++;
     _retryTimer?.cancel();
@@ -173,8 +195,7 @@ class _NativeAdCardState extends State<NativeAdCard>
     _isLoaded = false;
     _isLoading = false;
     if (ad != null) {
-      _disposedAds.add(ad);
-      unawaited(ad.dispose());
+      _disposeOnce(ad);
     }
   }
 
@@ -183,7 +204,7 @@ class _NativeAdCardState extends State<NativeAdCard>
     final ad = _nativeAd;
     _nativeAd = null;
     _isLoading = false;
-    if (ad != null && !_disposedAds.remove(ad)) unawaited(ad.dispose());
+    if (ad != null) _disposeOnce(ad);
     _emit(AdEventType.failedToLoad, error: error);
     if (mounted) setState(() => _loadFailed = true);
     _scheduleRetry();
@@ -208,7 +229,8 @@ class _NativeAdCardState extends State<NativeAdCard>
   @override
   void didUpdateWidget(covariant NativeAdCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.adUnitId != widget.adUnitId ||
+    if (oldWidget.placement != widget.placement ||
+        oldWidget.adUnitId != widget.adUnitId ||
         oldWidget.template != widget.template) {
       _disposeAd();
       _retry.reset();
@@ -234,6 +256,12 @@ class _NativeAdCardState extends State<NativeAdCard>
       AdEvent(
         format: AdFormat.native,
         type: type,
+        placement: widget.placement,
+        adUnitId: AdsService.instance.config.adUnitIdFor(
+          AdFormat.native,
+          placement: widget.placement,
+          adUnitId: widget.adUnitId,
+        ),
         error: error,
         mediationAdapter: adapter,
         revenue: revenue,
@@ -254,7 +282,16 @@ class _NativeAdCardState extends State<NativeAdCard>
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
-    if (_loadFailed) return const SizedBox.shrink();
+    if (_loadFailed ||
+        !AdsService.instance.canServeAds ||
+        AdsService.instance.config.adUnitIdFor(
+              AdFormat.native,
+              placement: widget.placement,
+              adUnitId: widget.adUnitId,
+            ) ==
+            null) {
+      return const SizedBox.shrink();
+    }
 
     return ConstrainedBox(
       constraints: BoxConstraints(

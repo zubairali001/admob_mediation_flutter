@@ -46,6 +46,12 @@ final class AdsConfig {
     this.rewarded = const AdUnitId(),
     this.rewardedInterstitial = const AdUnitId(),
     this.native = const AdUnitId(),
+    this.appOpenPlacements = const <String, AdUnitId>{},
+    this.bannerPlacements = const <String, AdUnitId>{},
+    this.interstitialPlacements = const <String, AdUnitId>{},
+    this.rewardedPlacements = const <String, AdUnitId>{},
+    this.rewardedInterstitialPlacements = const <String, AdUnitId>{},
+    this.nativePlacements = const <String, AdUnitId>{},
     bool? useTestAds,
     this.testDeviceIds = const <String>[],
     this.ageRestrictedTreatment = AgeRestrictedTreatment.unspecified,
@@ -69,6 +75,16 @@ final class AdsConfig {
   final AdUnitId rewarded;
   final AdUnitId rewardedInterstitial;
   final AdUnitId native;
+
+  /// Named ad units per format. Keys identify locations in your app.
+  /// Treat these maps as immutable after initialization. Named full-screen
+  /// placements preload only when first accessed, not all at startup.
+  final Map<String, AdUnitId> appOpenPlacements;
+  final Map<String, AdUnitId> bannerPlacements;
+  final Map<String, AdUnitId> interstitialPlacements;
+  final Map<String, AdUnitId> rewardedPlacements;
+  final Map<String, AdUnitId> rewardedInterstitialPlacements;
+  final Map<String, AdUnitId> nativePlacements;
 
   /// When true, Google's public test id replaces each configured format.
   /// Defaults to true in debug builds (or with --dart-define=FORCE_TEST_ADS=true).
@@ -112,18 +128,96 @@ final class AdsConfig {
 
   /// Resolves the ad unit id to request for [format], falling back to
   /// Google's test ids when [useTestAds] is on. Returns null when the
-  /// format isn't configured for the current platform.
-  String? adUnitIdFor(AdFormat format) {
-    final configuredId = switch (format) {
-      AdFormat.appOpen => appOpen,
-      AdFormat.banner => banner,
-      AdFormat.interstitial => interstitial,
-      AdFormat.rewarded => rewarded,
-      AdFormat.rewardedInterstitial => rewardedInterstitial,
-      AdFormat.native => native,
-    }.resolve();
-    if (configuredId == null || configuredId.trim().isEmpty) return null;
+  /// format isn't configured for the current platform. Named lookups never
+  /// fall back to the default; unknown/blank names throw [ArgumentError].
+  /// [placement] and a direct [adUnitId] override are mutually exclusive.
+  String? adUnitIdFor(AdFormat format, {String? placement, String? adUnitId}) {
+    if (placement != null && adUnitId != null) {
+      throw ArgumentError('Specify either placement or adUnitId, not both.');
+    }
+    final unit = placement != null
+        ? _placementFor(format, placement)
+        : switch (format) {
+            AdFormat.appOpen => appOpen,
+            AdFormat.banner => banner,
+            AdFormat.interstitial => interstitial,
+            AdFormat.rewarded => rewarded,
+            AdFormat.rewardedInterstitial => rewardedInterstitial,
+            AdFormat.native => native,
+          };
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.iOS)) {
+      return null;
+    }
+    final configuredId = (adUnitId ?? unit.resolve())?.trim();
+    if (configuredId == null || configuredId.isEmpty) return null;
     return useTestAds ? _googleTestId(format) : configuredId;
+  }
+
+  /// Registered placements for [format].
+  Map<String, AdUnitId> placementsFor(AdFormat format) => switch (format) {
+    AdFormat.appOpen => appOpenPlacements,
+    AdFormat.banner => bannerPlacements,
+    AdFormat.interstitial => interstitialPlacements,
+    AdFormat.rewarded => rewardedPlacements,
+    AdFormat.rewardedInterstitial => rewardedInterstitialPlacements,
+    AdFormat.native => nativePlacements,
+  };
+
+  AdUnitId _placementFor(AdFormat format, String placement) {
+    final unit = placementsFor(format)[placement];
+    if (placement.trim().isEmpty || unit == null) {
+      throw ArgumentError.value(
+        placement,
+        'placement',
+        'No ${format.name} ad unit is registered for this placement.',
+      );
+    }
+    return unit;
+  }
+
+  /// Takes an immutable snapshot for the initialized service.
+  @internal
+  AdsConfig snapshot() {
+    for (final format in AdFormat.values) {
+      for (final name in placementsFor(format).keys) {
+        if (name.isEmpty || name.trim() != name) {
+          throw ArgumentError.value(
+            name,
+            '${format.name}Placements',
+            'Placement names must be nonempty with no surrounding whitespace.',
+          );
+        }
+      }
+    }
+    return AdsConfig(
+      appOpen: appOpen,
+      banner: banner,
+      interstitial: interstitial,
+      rewarded: rewarded,
+      rewardedInterstitial: rewardedInterstitial,
+      native: native,
+      useTestAds: useTestAds,
+      ageRestrictedTreatment: ageRestrictedTreatment,
+      underAgeOfConsent: underAgeOfConsent,
+      maxAdContentRating: maxAdContentRating,
+      adRequest: adRequest,
+      interstitialMinInterval: interstitialMinInterval,
+      rewardedInterstitialMinInterval: rewardedInterstitialMinInterval,
+      autoShowAppOpenOnResume: autoShowAppOpenOnResume,
+      debugGeography: debugGeography,
+      mediationConsentProvider: mediationConsentProvider,
+      appOpenPlacements: Map.unmodifiable(appOpenPlacements),
+      bannerPlacements: Map.unmodifiable(bannerPlacements),
+      interstitialPlacements: Map.unmodifiable(interstitialPlacements),
+      rewardedPlacements: Map.unmodifiable(rewardedPlacements),
+      rewardedInterstitialPlacements: Map.unmodifiable(
+        rewardedInterstitialPlacements,
+      ),
+      nativePlacements: Map.unmodifiable(nativePlacements),
+      testDeviceIds: List.unmodifiable(testDeviceIds),
+    );
   }
 
   /// Builds the request for [format], optionally merging adapter [extras].

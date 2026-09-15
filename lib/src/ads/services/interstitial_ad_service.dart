@@ -9,6 +9,9 @@ import '../core/full_screen_ad_service.dart';
 class InterstitialAdService extends FullScreenAdService<InterstitialAd> {
   InterstitialAdService._() : super(format: AdFormat.interstitial);
 
+  InterstitialAdService.forPlacement(String placement)
+    : super(format: AdFormat.interstitial, placement: placement);
+
   static final InterstitialAdService instance = InterstitialAdService._();
 
   @override
@@ -16,13 +19,13 @@ class InterstitialAdService extends FullScreenAdService<InterstitialAd> {
       AdsService.instance.config.interstitialMinInterval;
 
   @override
-  Future<void> loadPlatformAd() {
+  Future<void> loadPlatformAd(int generation) {
     return InterstitialAd.load(
       adUnitId: adUnitId!,
       request: AdsService.instance.config.requestFor(format),
       adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: onAdLoaded,
-        onAdFailedToLoad: onAdFailedToLoad,
+        onAdLoaded: (ad) => onAdLoaded(ad, generation),
+        onAdFailedToLoad: (error) => onAdFailedToLoad(error, generation),
       ),
     );
   }

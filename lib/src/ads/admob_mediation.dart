@@ -8,6 +8,7 @@ import 'ads_service.dart';
 import 'consent/consent_service.dart';
 import 'consent/mediation_consent_bridge.dart';
 import 'core/ad_events.dart';
+import 'core/full_screen_ad_service.dart';
 import 'services/app_open_ad_service.dart';
 import 'services/interstitial_ad_service.dart';
 import 'services/rewarded_ad_service.dart';
@@ -41,7 +42,8 @@ abstract final class AdMobMediation {
   /// request configuration → Mobile Ads SDK + all mediation adapters.
   ///
   /// Safe to call multiple times (subsequent calls await the first run).
-  /// Every configured format preloads when the SDK is ready.
+  /// Default full-screen units preload when ready. Named placements start
+  /// preloading only when accessed through load, show, or readiness APIs.
   static Future<void> initialize({AdsConfig config = const AdsConfig()}) {
     final future = AdsService.instance.initialize(config: config);
     InterstitialAdService.instance;
@@ -73,15 +75,20 @@ abstract final class AdMobMediation {
   /// Shows the pre-loaded interstitial. Returns `false` (and pre-loads the
   /// next one) when no ad is ready or the frequency cap blocks it — just
   /// continue your flow in that case.
-  static Future<bool> showInterstitial({VoidCallback? onDismissed}) =>
-      InterstitialAdService.instance.show(onDismissed: onDismissed);
+  static Future<bool> showInterstitial({
+    String? placement,
+    VoidCallback? onDismissed,
+  }) => _serviceFor(
+    AdFormat.interstitial,
+    placement,
+  ).show(onDismissed: onDismissed);
 
   /// Explicit pre-load; normally unnecessary (the service self-loads).
-  static Future<void> loadInterstitial() =>
-      InterstitialAdService.instance.load();
+  static Future<void> loadInterstitial({String? placement}) =>
+      _serviceFor(AdFormat.interstitial, placement).load();
 
   static ValueListenable<bool> get isInterstitialReady =>
-      InterstitialAdService.instance.isAdReady;
+      isAdReady(AdFormat.interstitial);
 
   // ------------------------------------------------------------------
   // Rewarded
@@ -90,37 +97,44 @@ abstract final class AdMobMediation {
   /// Shows the pre-loaded rewarded ad. [onReward] fires only when the user
   /// actually earned the reward — grant it there and nowhere else.
   static Future<bool> showRewarded({
+    String? placement,
     required void Function(RewardItem reward) onReward,
     VoidCallback? onDismissed,
-  }) => RewardedAdService.instance.showWithReward(
-    onReward: (_, reward) => onReward(reward),
-    onDismissed: onDismissed,
-  );
+  }) => (_serviceFor(AdFormat.rewarded, placement) as RewardedAdService)
+      .showWithReward(
+        onReward: (_, reward) => onReward(reward),
+        onDismissed: onDismissed,
+      );
 
-  /// Explicit preload; configured rewarded ads also preload automatically.
-  static Future<void> loadRewarded() => RewardedAdService.instance.load();
+  /// Preloads the selected placement; default rewarded ads also load at startup.
+  static Future<void> loadRewarded({String? placement}) =>
+      _serviceFor(AdFormat.rewarded, placement).load();
 
   static ValueListenable<bool> get isRewardedReady =>
-      RewardedAdService.instance.isAdReady;
+      isAdReady(AdFormat.rewarded);
 
   // ------------------------------------------------------------------
   // Rewarded interstitial
   // ------------------------------------------------------------------
 
   static Future<bool> showRewardedInterstitial({
+    String? placement,
     required void Function(RewardItem reward) onReward,
     VoidCallback? onDismissed,
-  }) => RewardedInterstitialAdService.instance.showWithReward(
-    onReward: (_, reward) => onReward(reward),
-    onDismissed: onDismissed,
-  );
+  }) =>
+      (_serviceFor(AdFormat.rewardedInterstitial, placement)
+              as RewardedInterstitialAdService)
+          .showWithReward(
+            onReward: (_, reward) => onReward(reward),
+            onDismissed: onDismissed,
+          );
 
-  /// Explicit preload; configured rewarded interstitials also preload automatically.
-  static Future<void> loadRewardedInterstitial() =>
-      RewardedInterstitialAdService.instance.load();
+  /// Preloads the selected placement; the default unit also loads at startup.
+  static Future<void> loadRewardedInterstitial({String? placement}) =>
+      _serviceFor(AdFormat.rewardedInterstitial, placement).load();
 
   static ValueListenable<bool> get isRewardedInterstitialReady =>
-      RewardedInterstitialAdService.instance.isAdReady;
+      isAdReady(AdFormat.rewardedInterstitial);
 
   // ------------------------------------------------------------------
   // App open
@@ -129,13 +143,16 @@ abstract final class AdMobMediation {
   /// Manually show an app open ad (e.g. on cold start after a splash).
   /// With `AdsConfig.autoShowAppOpenOnResume` (default true) one also shows
   /// automatically whenever the app returns to the foreground.
-  static Future<bool> showAppOpen({VoidCallback? onDismissed}) =>
-      AppOpenAdService.instance.show(onDismissed: onDismissed);
+  static Future<bool> showAppOpen({
+    String? placement,
+    VoidCallback? onDismissed,
+  }) => _serviceFor(AdFormat.appOpen, placement).show(onDismissed: onDismissed);
 
-  static Future<void> loadAppOpen() => AppOpenAdService.instance.load();
+  static Future<void> loadAppOpen({String? placement}) =>
+      _serviceFor(AdFormat.appOpen, placement).load();
 
   static ValueListenable<bool> get isAppOpenReady =>
-      AppOpenAdService.instance.isAdReady;
+      isAdReady(AdFormat.appOpen);
 
   /// Suppress the next automatic app-open ad (call before opening payment
   /// sheets, external sign-in, image pickers...).
@@ -150,6 +167,72 @@ abstract final class AdMobMediation {
       AppOpenAdService.instance.autoShowEnabled;
   static set appOpenAutoShowEnabled(bool enabled) =>
       AppOpenAdService.instance.autoShowEnabled = enabled;
+
+  /// Readiness for a full-screen placement. First access starts preloading.
+  /// Omit [placement] to observe the existing default unit.
+  static ValueListenable<bool> isAdReady(
+    AdFormat format, {
+    String? placement,
+  }) => _serviceFor(format, placement).isAdReady;
+
+  /// Stops a full-screen placement's retries and releases its cached ad.
+  /// Existing readiness listeners remain valid. A subsequent load, show, or
+  /// readiness lookup starts preloading again. Banner/native widgets are
+  /// released by removing them from the widget tree.
+  static Future<void> stopPreloading(AdFormat format, {String? placement}) {
+    _validateFullScreenPlacement(format, placement);
+    final service = placement == null
+        ? _defaultService(format)
+        : _placements[(format, placement)];
+    return service?.stopPreloading() ?? Future<void>.value();
+  }
+
+  static final Map<(AdFormat, String), FullScreenAdService<AdWithoutView>>
+  _placements = {};
+
+  static FullScreenAdService<AdWithoutView> _serviceFor(
+    AdFormat format,
+    String? placement,
+  ) {
+    _validateFullScreenPlacement(format, placement);
+    final service = placement == null
+        ? _defaultService(format)
+        : _placements.putIfAbsent(
+            (format, placement),
+            () => switch (format) {
+              AdFormat.interstitial => InterstitialAdService.forPlacement(
+                placement,
+              ),
+              AdFormat.rewarded => RewardedAdService.forPlacement(placement),
+              AdFormat.rewardedInterstitial =>
+                RewardedInterstitialAdService.forPlacement(placement),
+              AdFormat.appOpen => AppOpenAdService.forPlacement(placement),
+              _ => throw ArgumentError.value(format, 'format'),
+            },
+          );
+    service.startPreloading();
+    return service;
+  }
+
+  static void _validateFullScreenPlacement(AdFormat format, String? placement) {
+    if (format == AdFormat.banner || format == AdFormat.native) {
+      throw ArgumentError.value(
+        format,
+        'format',
+        'Use the ad widget for this format.',
+      );
+    }
+    AdsService.instance.config.adUnitIdFor(format, placement: placement);
+  }
+
+  static FullScreenAdService<AdWithoutView> _defaultService(AdFormat format) =>
+      switch (format) {
+        AdFormat.interstitial => InterstitialAdService.instance,
+        AdFormat.rewarded => RewardedAdService.instance,
+        AdFormat.rewardedInterstitial => RewardedInterstitialAdService.instance,
+        AdFormat.appOpen => AppOpenAdService.instance,
+        _ => throw ArgumentError.value(format, 'format'),
+      };
 
   // ------------------------------------------------------------------
   // Mediation consent

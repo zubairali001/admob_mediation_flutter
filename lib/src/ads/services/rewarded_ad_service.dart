@@ -11,6 +11,9 @@ import '../core/full_screen_ad_service.dart';
 class RewardedAdService extends FullScreenAdService<RewardedAd> {
   RewardedAdService._() : super(format: AdFormat.rewarded);
 
+  RewardedAdService.forPlacement(String placement)
+    : super(format: AdFormat.rewarded, placement: placement);
+
   static final RewardedAdService instance = RewardedAdService._();
 
   OnUserEarnedRewardCallback? _pendingOnReward;
@@ -27,13 +30,13 @@ class RewardedAdService extends FullScreenAdService<RewardedAd> {
   }
 
   @override
-  Future<void> loadPlatformAd() {
+  Future<void> loadPlatformAd(int generation) {
     return RewardedAd.load(
       adUnitId: adUnitId!,
       request: AdsService.instance.config.requestFor(format),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: onAdLoaded,
-        onAdFailedToLoad: onAdFailedToLoad,
+        onAdLoaded: (ad) => onAdLoaded(ad, generation),
+        onAdFailedToLoad: (error) => onAdFailedToLoad(error, generation),
       ),
     );
   }

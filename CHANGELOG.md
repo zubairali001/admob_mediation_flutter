@@ -1,3 +1,21 @@
+## 0.2.0
+
+- Add named placement maps for every format, with Android/iOS IDs per placement.
+  Existing default IDs and method calls remain supported.
+- Add `placement` to banner/native widgets and full-screen load/show methods.
+- Load named full-screen placements on demand with independent caches/retries,
+  shared format cooldowns, readiness via `isAdReady`, and `stopPreloading`.
+  Automatic foreground app-open ads continue to use the default app-open unit.
+- Include placement and requested ad-unit ID in lifecycle/revenue events.
+- Apply test-ID substitution to direct widget ID overrides as well as placements.
+- Snapshot placement configuration at initialization and reject unknown names
+  instead of silently loading an unrelated default unit.
+- Fix concurrent full-screen loads and discard callbacks from invalidated loads.
+- Release old widget ads on placement changes without retaining disposed ads,
+  and hide native placeholders when ads are disabled or unconfigured.
+- Add regression coverage for ten simultaneous banner placements, platform ID
+  resolution, placement switching, cache isolation, and stale load callbacks.
+
 ## 0.1.2
 
 - Fix `NativeAdCard` losing its loaded (or in-flight) ad whenever it scrolled

@@ -21,9 +21,21 @@ import '../core/retry_policy.dart';
 /// The ad unit id comes from the app's `AdsConfig`; pass [adUnitId] to
 /// override it for this instance (e.g. a second banner placement).
 class AdaptiveBannerAd extends StatefulWidget {
-  const AdaptiveBannerAd({super.key, this.adUnitId, this.collapsible = false});
+  const AdaptiveBannerAd({
+    super.key,
+    this.placement,
+    this.adUnitId,
+    this.collapsible = false,
+  }) : assert(
+         placement == null || adUnitId == null,
+         'Specify either placement or adUnitId, not both.',
+       );
 
   final String? adUnitId;
+
+  /// Key in the matching AdsConfig placement map. Omit to use the default ID.
+  /// Cannot be combined with [adUnitId]. Both paths respect test-ad mode.
+  final String? placement;
   final bool collapsible;
 
   @override
@@ -40,7 +52,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   Timer? _retryTimer;
   final RetryPolicy _retry = RetryPolicy();
   int _loadGeneration = 0;
-  final Set<Ad> _disposedAds = {}; // prevent double-dispose on race
+  final Expando<bool> _disposedAds = Expando<bool>();
 
   @override
   void initState() {
@@ -64,9 +76,11 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     if (!mounted || !AdsService.instance.canServeAds) return;
     if (_bannerAd != null || _isLoading) return;
 
-    final adUnitId =
-        widget.adUnitId ??
-        AdsService.instance.config.adUnitIdFor(AdFormat.banner);
+    final adUnitId = AdsService.instance.config.adUnitIdFor(
+      AdFormat.banner,
+      placement: widget.placement,
+      adUnitId: widget.adUnitId,
+    );
     if (adUnitId == null) return;
 
     _isLoading = true;
@@ -104,8 +118,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
       listener: BannerAdListener(
         onAdLoaded: (ad) {
           if (!_isCurrentAd(ad, generation)) {
-            if (_disposedAds.remove(ad)) return; // already disposed
-            unawaited(ad.dispose());
+            _disposeOnce(ad);
             return;
           }
           _emit(
@@ -120,7 +133,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
           });
         },
         onAdFailedToLoad: (ad, error) {
-          if (!_disposedAds.remove(ad)) unawaited(ad.dispose());
+          _disposeOnce(ad);
           if (!_isCurrentAd(ad, generation)) return;
           _emit(AdEventType.failedToLoad, error: error);
           _bannerAd = null;
@@ -131,22 +144,29 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
           });
           _scheduleRetry();
         },
-        onAdImpression: (ad) => _emit(AdEventType.impression),
-        onAdClicked: (ad) => _emit(AdEventType.clicked),
-        onPaidEvent: (ad, valueMicros, precision, currencyCode) => _emit(
-          AdEventType.paid,
-          adapter: ad.responseInfo?.mediationAdapterClassName,
-          revenue: AdRevenue(
-            valueMicros: valueMicros,
-            currencyCode: currencyCode,
-            precision: precision,
-          ),
-        ),
+        onAdImpression: (ad) {
+          if (_isCurrentAd(ad, generation)) _emit(AdEventType.impression);
+        },
+        onAdClicked: (ad) {
+          if (_isCurrentAd(ad, generation)) _emit(AdEventType.clicked);
+        },
+        onPaidEvent: (ad, valueMicros, precision, currencyCode) {
+          if (!_isCurrentAd(ad, generation)) return;
+          _emit(
+            AdEventType.paid,
+            adapter: ad.responseInfo?.mediationAdapterClassName,
+            revenue: AdRevenue(
+              valueMicros: valueMicros,
+              currencyCode: currencyCode,
+              precision: precision,
+            ),
+          );
+        },
       ),
     );
 
     if (!_isCurrentLoad(generation)) {
-      unawaited(banner.dispose());
+      _disposeOnce(banner);
       return;
     }
     setState(() {
@@ -160,6 +180,12 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     }
   }
 
+  void _disposeOnce(Ad ad) {
+    if (_disposedAds[ad] == true) return;
+    _disposedAds[ad] = true;
+    unawaited(ad.dispose());
+  }
+
   void _disposeAd() {
     _loadGeneration++;
     _retryTimer?.cancel();
@@ -170,8 +196,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
     _isLoaded = false;
     _isLoading = false;
     if (ad != null) {
-      _disposedAds.add(ad);
-      unawaited(ad.dispose());
+      _disposeOnce(ad);
     }
   }
 
@@ -185,7 +210,7 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   }
 
   void _handleLoadFailure(Object error, int generation, {BannerAd? ad}) {
-    if (ad != null) unawaited(ad.dispose());
+    if (ad != null) _disposeOnce(ad);
     if (!_isCurrentLoad(generation)) return;
     _emit(AdEventType.failedToLoad, error: error);
     _bannerAd = null;
@@ -213,7 +238,8 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
   @override
   void didUpdateWidget(covariant AdaptiveBannerAd oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.adUnitId != widget.adUnitId ||
+    if (oldWidget.placement != widget.placement ||
+        oldWidget.adUnitId != widget.adUnitId ||
         oldWidget.collapsible != widget.collapsible) {
       _disposeAd();
       _retry.reset();
@@ -239,6 +265,12 @@ class _AdaptiveBannerAdState extends State<AdaptiveBannerAd> {
       AdEvent(
         format: AdFormat.banner,
         type: type,
+        placement: widget.placement,
+        adUnitId: AdsService.instance.config.adUnitIdFor(
+          AdFormat.banner,
+          placement: widget.placement,
+          adUnitId: widget.adUnitId,
+        ),
         error: error,
         revenue: revenue,
         mediationAdapter: adapter,

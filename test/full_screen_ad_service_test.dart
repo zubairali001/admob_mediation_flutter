@@ -1,3 +1,4 @@
+import 'package:admob_mediation_flutter/src/ads/ads_service.dart';
 import 'package:admob_mediation_flutter/src/ads/core/ad_events.dart';
 import 'package:admob_mediation_flutter/src/ads/core/full_screen_ad_service.dart';
 import 'package:flutter/foundation.dart';
@@ -71,6 +72,98 @@ void main() {
     expect(service.isAdAvailable, isTrue);
   });
 
+  test('concurrent loads and startup microtask request only one ad', () async {
+    final service = _FakeFullScreenService()..deferLoad = true;
+    addTearDown(service.dispose);
+    service.startPreloading();
+    await Future.wait(List.generate(10, (_) => service.load()));
+    await _flushAsyncWork();
+    expect(service.loadCount, 1);
+    service.completeLoad();
+    expect(service.isAdAvailable, isTrue);
+  });
+
+  test(
+    'stopped and restarted loads ignore stale success and failure',
+    () async {
+      final service = _FakeFullScreenService()..deferLoad = true;
+      addTearDown(service.dispose);
+      service.startPreloading();
+      await _flushAsyncWork();
+      final oldGeneration = service.generations.single;
+      await service.stopPreloading();
+      service.startPreloading();
+      await _flushAsyncWork();
+      final staleAd = _FakeAd();
+      service.deliverLoaded(staleAd, oldGeneration);
+      service.deliverFailure(
+        LoadAdError(3, 'test', 'no fill', null),
+        oldGeneration,
+      );
+      expect(staleAd.disposed, isTrue);
+      expect(service.isAdReady.value, isFalse);
+      await service.load();
+      expect(service.loadCount, 2);
+      service.completeLoad();
+      expect(service.isAdReady.value, isTrue);
+    },
+  );
+
+  test('disable then enable cannot accept a previous request', () async {
+    final service = _FakeFullScreenService(
+      canServeAds: () => AdsService.instance.adsEnabled.value,
+    )..deferLoad = true;
+    addTearDown(service.dispose);
+    service.startPreloading();
+    await _flushAsyncWork();
+    final oldGeneration = service.generations.single;
+    AdsService.instance.setAdsEnabled(false);
+    AdsService.instance.setAdsEnabled(true);
+    await _flushAsyncWork();
+    final staleAd = _FakeAd();
+    service.deliverLoaded(staleAd, oldGeneration);
+    expect(staleAd.disposed, isTrue);
+    expect(service.isAdReady.value, isFalse);
+    service.completeLoad();
+    expect(service.isAdReady.value, isTrue);
+  });
+
+  test(
+    'placements have separate caches and share the format cooldown',
+    () async {
+      final first = _FakeFullScreenService(
+        placement: 'first',
+        interval: const Duration(minutes: 1),
+      );
+      final second = _FakeFullScreenService(
+        placement: 'second',
+        interval: const Duration(minutes: 1),
+      );
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      first.startPreloading();
+      second.startPreloading();
+      await _flushAsyncWork();
+      expect(first.loadCount, 1);
+      expect(second.loadCount, 1);
+      expect(await first.show(), isTrue);
+      expect(await second.show(), isFalse);
+      first.dismiss();
+      expect(second.isAdReady.value, isTrue);
+      expect(await second.show(), isFalse);
+    },
+  );
+
+  test('load completing after disposal releases its ad', () async {
+    final service = _FakeFullScreenService()..deferLoad = true;
+    service.startPreloading();
+    await _flushAsyncWork();
+    service.dispose();
+    final ad = _FakeAd();
+    service.deliverLoaded(ad, service.generations.single);
+    expect(ad.disposed, isTrue);
+  });
+
   test('disabled services neither load nor show', () async {
     var enabled = false;
     final service = _FakeFullScreenService(canServeAds: () => enabled);
@@ -99,12 +192,25 @@ final class _FakeAd extends AdWithoutView {
 }
 
 final class _FakeFullScreenService extends FullScreenAdService<_FakeAd> {
-  _FakeFullScreenService({bool Function()? canServeAds})
-    : super(
-        format: AdFormat.interstitial,
-        autoPreload: false,
-        canServeAds: canServeAds ?? _alwaysEnabled,
-      );
+  _FakeFullScreenService({
+    bool Function()? canServeAds,
+    super.placement,
+    this.interval = Duration.zero,
+  }) : super(
+         format: AdFormat.interstitial,
+         autoPreload: false,
+         canServeAds: canServeAds ?? _alwaysEnabled,
+       );
+
+  final Duration interval;
+  @override
+  Duration get minInterval => interval;
+  bool deferLoad = false;
+  final List<int> generations = [];
+  void deliverLoaded(_FakeAd ad, int generation) => onAdLoaded(ad, generation);
+  void deliverFailure(LoadAdError error, int generation) =>
+      onAdFailedToLoad(error, generation);
+  void completeLoad() => onAdLoaded(_FakeAd(), generations.last);
 
   bool throwOnLoad = false;
   bool throwOnShow = false;
@@ -115,10 +221,11 @@ final class _FakeFullScreenService extends FullScreenAdService<_FakeAd> {
   String get adUnitId => 'test-ad-unit';
 
   @override
-  Future<void> loadPlatformAd() async {
+  Future<void> loadPlatformAd(int generation) async {
     loadCount++;
+    generations.add(generation);
     if (throwOnLoad) throw StateError('load failed');
-    onAdLoaded(_FakeAd());
+    if (!deferLoad) onAdLoaded(_FakeAd(), generation);
   }
 
   @override

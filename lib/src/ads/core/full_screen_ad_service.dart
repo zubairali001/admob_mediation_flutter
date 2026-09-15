@@ -20,11 +20,12 @@ import 'retry_policy.dart';
 ///  * **TTL expiry** — cached ads are dropped after [ttl] (AdMob ads go
 ///    stale after ~1 hour, app open ads after 4).
 ///  * **Show coordination** — a shared lock prevents full-screen ads from
-///    stacking, plus a per-service [minInterval].
+///    stacking, plus a per-format [minInterval].
 ///  * **Event emission** for analytics via [AdEventBus].
 abstract class FullScreenAdService<T extends AdWithoutView> {
   FullScreenAdService({
     required this.format,
+    this.placement,
     this.ttl = const Duration(hours: 1),
     bool autoPreload = true,
     bool Function()? canServeAds,
@@ -38,11 +39,12 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   }
 
   final AdFormat format;
+  final String? placement;
 
   /// How long a loaded ad stays valid before being discarded.
   final Duration ttl;
 
-  /// Minimum time between two shows of *this* service. Override to read
+  /// Minimum time between shows of this format across all placements. Override to read
   /// from [AdsService.instance.config] so it stays configurable per app.
   Duration get minInterval => Duration.zero;
 
@@ -54,7 +56,8 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
 
   T? _ad;
   DateTime? _loadedAt;
-  DateTime? _lastShownAt;
+  static final Map<AdFormat, DateTime> _lastShownAt = {};
+  int _loadGeneration = 0;
   bool _isLoading = false;
   Timer? _retryTimer;
   Timer? _expiryTimer;
@@ -70,12 +73,13 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
 
   /// Resolved from the app's [AdsConfig]; null when the format isn't
   /// configured for this platform (the service then stays idle).
-  String? get adUnitId => AdsService.instance.config.adUnitIdFor(format);
+  String? get adUnitId =>
+      AdsService.instance.config.adUnitIdFor(format, placement: placement);
 
   /// Kick off the platform load call; report back through
   /// [onAdLoaded] / [onAdFailedToLoad].
   @protected
-  Future<void> loadPlatformAd();
+  Future<void> loadPlatformAd(int generation);
 
   /// Set `ad.fullScreenContentCallback = buildFullScreenCallback(...)` and
   /// invoke the type-specific `ad.show(...)`.
@@ -105,6 +109,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   Future<void> stopPreloading() async {
     if (!_preloadEnabled) return;
     _preloadEnabled = false;
+    _invalidateLoad();
     _retryTimer?.cancel();
     _retryTimer = null;
     _expiryTimer?.cancel();
@@ -117,14 +122,17 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   Future<void> load() async {
     if (_disposed || !_preloadEnabled || !_canServeAds() || _isLoading) return;
     if (isAdAvailable || adUnitId == null) return;
-    await _discardCachedAd();
-
     _isLoading = true;
-    _emit(AdEventType.requested);
+    final generation = ++_loadGeneration;
     try {
-      await loadPlatformAd();
+      await _discardCachedAd();
+      if (!_isCurrentLoad(generation)) return;
+      _emit(AdEventType.requested);
+      await loadPlatformAd(generation);
     } catch (error, stackTrace) {
-      _handleLoadFailure(error, stackTrace: stackTrace);
+      if (_isCurrentLoad(generation)) {
+        _handleLoadFailure(error, stackTrace: stackTrace);
+      }
     }
   }
 
@@ -146,6 +154,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
     }
 
     final ad = _ad!;
+    isAnyFullScreenAdShowing = true;
     _ad = null;
     _loadedAt = null;
     isAdReady.value = false;
@@ -153,12 +162,10 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
     _expiryTimer = null;
     _pendingOnDismissed = onDismissed;
     _pendingOnFinished = onFinished;
-    onWillShow?.call();
-
-    isAnyFullScreenAdShowing = true;
     final result = Completer<bool>();
     _pendingShowResult = result;
     try {
+      onWillShow?.call();
       await showPlatformAd(ad);
     } catch (error, stackTrace) {
       _emit(AdEventType.failedToShow, error: error);
@@ -183,6 +190,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _invalidateLoad();
     AdsService.instance.status.removeListener(_onAdsStatusChanged);
     AdsService.instance.adsEnabled.removeListener(_onAdsStatusChanged);
     _retryTimer?.cancel();
@@ -200,9 +208,8 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   Completer<bool>? _pendingShowResult;
 
   @protected
-  void onAdLoaded(T ad) {
-    if (_disposed || !_preloadEnabled || !_canServeAds()) {
-      _isLoading = false;
+  void onAdLoaded(T ad, int generation) {
+    if (!_isCurrentLoad(generation) || !_isLoading) {
       unawaited(disposePlatformAd(ad));
       return;
     }
@@ -220,8 +227,8 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   }
 
   @protected
-  void onAdFailedToLoad(LoadAdError error) {
-    _handleLoadFailure(error);
+  void onAdFailedToLoad(LoadAdError error, int generation) {
+    if (_isCurrentLoad(generation)) _handleLoadFailure(error);
   }
 
   /// Standard callback wiring shared by all full-screen formats.
@@ -229,7 +236,7 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   FullScreenContentCallback<A> buildFullScreenCallback<A extends Ad>() {
     return FullScreenContentCallback<A>(
       onAdShowedFullScreenContent: (ad) {
-        _lastShownAt = _now();
+        _lastShownAt[format] = _now();
         _completeShowResult(true);
         _emit(AdEventType.shown, adapter: _adapterOf(ad));
       },
@@ -267,7 +274,9 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   // ------------------------------------------------------------------
 
   void _onAdsStatusChanged() {
+    if (_disposed) return;
     if (!_canServeAds()) {
+      _invalidateLoad();
       _retryTimer?.cancel();
       _retryTimer = null;
       _expiryTimer?.cancel();
@@ -292,15 +301,16 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
   }
 
   bool get _isIntervalElapsed {
-    if (_lastShownAt == null || minInterval == Duration.zero) return true;
-    return _now().difference(_lastShownAt!) >= minInterval;
+    final lastShown = _lastShownAt[format];
+    if (lastShown == null || minInterval == Duration.zero) return true;
+    return _now().difference(lastShown) >= minInterval;
   }
 
   void _handleLoadFailure(Object error, {StackTrace? stackTrace}) {
     if (!_isLoading) return;
     _isLoading = false;
     _emit(AdEventType.failedToLoad, error: error);
-    if (_preloadEnabled && _canServeAds() && _retry.canRetry) {
+    if (!_disposed && _preloadEnabled && _canServeAds() && _retry.canRetry) {
       _retryTimer?.cancel();
       _retryTimer = Timer(_retry.nextDelay(), () => unawaited(load()));
     }
@@ -389,11 +399,23 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
     if (ad != null) await disposePlatformAd(ad);
   }
 
+  bool _isCurrentLoad(int generation) =>
+      !_disposed &&
+      _preloadEnabled &&
+      _canServeAds() &&
+      generation == _loadGeneration;
+
+  void _invalidateLoad() {
+    _loadGeneration++;
+    _isLoading = false;
+  }
+
   static bool _defaultCanServeAds() => AdsService.instance.canServeAds;
 
   @visibleForTesting
   static void resetGlobalStateForTesting() {
     isAnyFullScreenAdShowing = false;
+    _lastShownAt.clear();
   }
 
   String? _adapterOf(Ad ad) => ad.responseInfo?.mediationAdapterClassName;
@@ -409,6 +431,8 @@ abstract class FullScreenAdService<T extends AdWithoutView> {
       AdEvent(
         format: format,
         type: type,
+        placement: placement,
+        adUnitId: adUnitId,
         error: error,
         reward: reward,
         revenue: revenue,

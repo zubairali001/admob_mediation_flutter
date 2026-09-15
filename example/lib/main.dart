@@ -13,6 +13,16 @@ const _config = AdsConfig(
   rewarded: AdUnitId(android: 'configured', ios: 'configured'),
   rewardedInterstitial: AdUnitId(android: 'configured', ios: 'configured'),
   native: AdUnitId(android: 'configured', ios: 'configured'),
+  bannerPlacements: {
+    'home_bottom': AdUnitId(android: 'home-banner', ios: 'home-banner'),
+    'profile_bottom': AdUnitId(
+      android: 'profile-banner',
+      ios: 'profile-banner',
+    ),
+  },
+  interstitialPlacements: {
+    'level_complete': AdUnitId(android: 'level-ad', ios: 'level-ad'),
+  },
   autoShowAppOpenOnResume: false,
   interstitialMinInterval: Duration.zero,
   rewardedInterstitialMinInterval: Duration.zero,
@@ -52,6 +62,7 @@ class _AdsExamplePageState extends State<AdsExamplePage> {
   StreamSubscription<AdEvent>? _eventSubscription;
   String _lastEvent = 'Waiting for initialization';
   bool _adsEnabled = true;
+  String _bannerPlacement = 'home_bottom';
 
   @override
   void initState() {
@@ -86,7 +97,7 @@ class _AdsExamplePageState extends State<AdsExamplePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('AdMob mediation')),
-      bottomNavigationBar: const AdaptiveBannerAd(),
+      bottomNavigationBar: AdaptiveBannerAd(placement: _bannerPlacement),
       body: FutureBuilder<void>(
         future: _initialization,
         builder: (context, snapshot) {
@@ -96,6 +107,32 @@ class _AdsExamplePageState extends State<AdsExamplePage> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              DropdownButton<String>(
+                value: _bannerPlacement,
+                items: const [
+                  DropdownMenuItem(
+                    value: 'home_bottom',
+                    child: Text('Home banner'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'profile_bottom',
+                    child: Text('Profile banner'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _bannerPlacement = value);
+                },
+              ),
+              _ReadyButton(
+                ready: AdMobMediation.isAdReady(
+                  AdFormat.interstitial,
+                  placement: 'level_complete',
+                ),
+                label: 'Show level-complete interstitial',
+                onPressed: () => AdMobMediation.showInterstitial(
+                  placement: 'level_complete',
+                ),
+              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Ads enabled'),
